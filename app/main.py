@@ -6,7 +6,7 @@ import os
 from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header, Query
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -174,7 +174,7 @@ def create_job(payload: JobCreate, background: BackgroundTasks, db: Session = De
     db.refresh(job)
 
     background.add_task(tasks.process_job, job.id)
-    return JSONResponse(job_to_dict(job))
+    return job_to_dict(job)
 
 
 @app.get("/jobs")
