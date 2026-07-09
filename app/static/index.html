@@ -125,7 +125,12 @@
 </div>
 
 <script>
-const API = ""; // с root_path=/waybills nginx подставит
+// Строим API-префикс из текущего URL, чтобы работало и с /waybills, и с /waybills/
+const API = (() => {
+  const path = window.location.pathname;
+  const m = path.match(/^(.*?\/waybills)(\/|$)/);
+  return m ? m[1] : "";
+})();
 
 async function loadConfig() {
   const r = await fetch(API + "/config");
