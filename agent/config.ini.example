@@ -1,0 +1,21 @@
+[agent]
+# Публичный URL сервиса
+base_url = https://ваш-домен-или-ip/waybills
+
+# Токен для авторизации (см. AGENT_TOKEN на сервере)
+token = change-me-in-production
+
+# Город этого агента: almaty | astana | shymkent
+city = almaty
+
+# Имя принтера в системе (Get-Printer в PowerShell для просмотра)
+printer = Xprinter XP-460B
+
+# Путь к SumatraPDF.exe (относительный к agent.py или абсолютный)
+sumatra_path = SumatraPDF.exe
+
+# Как часто опрашивать сервер, сек
+poll_interval = 5
+
+# Тестовый режим: качает PDF, но не отправляет на принтер (сохраняет во временный файл)
+dry_run = false

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waybills — сборка накладных Kaspi</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; background: #f5f5f7; color: #1d1d1f;
+  }
+  .container { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+  h1 { font-size: 24px; margin-bottom: 8px; }
+  .subtitle { color: #86868b; margin-bottom: 30px; }
+  .card {
+    background: white; border-radius: 12px; padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 16px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 16px; color: #1d1d1f; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+  .field { flex: 1; min-width: 160px; }
+  label { display: block; font-size: 13px; color: #86868b; margin-bottom: 4px; }
+  input, select {
+    width: 100%; padding: 8px 10px; font-size: 14px;
+    border: 1px solid #d2d2d7; border-radius: 8px; background: white;
+  }
+  input:focus, select:focus { border-color: #007aff; outline: none; }
+  button {
+    padding: 10px 22px; font-size: 14px; font-weight: 500;
+    background: #007aff; color: white; border: none; border-radius: 8px;
+    cursor: pointer;
+  }
+  button:hover { background: #0051d5; }
+  button:disabled { background: #a1a1a6; cursor: not-allowed; }
+  .checkbox { display: flex; align-items: center; gap: 8px; }
+  .checkbox input { width: auto; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 12px; font-weight: 500;
+  }
+  .b-pending { background: #ffe58a; color: #7a5900; }
+  .b-parsing { background: #ffdca8; color: #6b3e00; }
+  .b-pdf_ready { background: #c8e6c9; color: #1b5e20; }
+  .b-printing { background: #b3e5fc; color: #01579b; }
+  .b-done { background: #d4edda; color: #155724; }
+  .b-error { background: #f5c6cb; color: #721c24; }
+  .b-queued { background: #e5e7eb; color: #374151; }
+  .b-claimed { background: #dbeafe; color: #1e40af; }
+  .b-A { background: #dbeafe; color: #1e40af; }
+  .b-B { background: #fef3c7; color: #92400e; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid #f2f2f7; }
+  th { color: #86868b; font-weight: 500; }
+  a { color: #007aff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .stat { padding: 10px; background: #f5f5f7; border-radius: 8px; }
+  .stat-label { font-size: 11px; color: #86868b; text-transform: uppercase; }
+  .stat-value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  .hint { font-size: 12px; color: #86868b; margin-top: 4px; }
+  .warning { background: #fff3cd; color: #856404; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📦 Сборка накладных Kaspi Доставки</h1>
+  <p class="subtitle">Готовим и печатаем накладные для склада</p>
+
+  <div class="card">
+    <h2>Новая сборка</h2>
+    <div class="row">
+      <div class="field">
+        <label>Город</label>
+        <select id="city"></select>
+      </div>
+      <div class="field">
+        <label>Дней назад</label>
+        <input type="number" id="days_back" value="7" min="1" max="14">
+      </div>
+      <div class="field">
+        <label>Ширина этикетки (мм)</label>
+        <input type="number" id="label_width" value="75" min="20" max="250" step="1">
+      </div>
+      <div class="field">
+        <label>Высота этикетки (мм)</label>
+        <input type="number" id="label_height" value="120" min="20" max="250" step="1">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Рулон А, шт (полный)</label>
+        <input type="number" id="roll_a" value="250" min="1" max="500">
+      </div>
+      <div class="field">
+        <label>Рулон Б, шт (маленький)</label>
+        <input type="number" id="roll_b" value="100" min="1" max="250">
+      </div>
+      <div class="field">
+        <label>Остаток ≤ N на ролле Б</label>
+        <input type="number" id="roll_b_threshold" value="100" min="1" max="250">
+        <div class="hint">Если хвост меньше, идёт на маленький рулон</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field checkbox">
+        <input type="checkbox" id="test_mode" checked>
+        <label for="test_mode">Тестовый режим (напечатать только N штук)</label>
+      </div>
+      <div class="field">
+        <label>N для теста</label>
+        <input type="number" id="test_limit" value="5" min="1" max="50">
+      </div>
+    </div>
+    <div class="warning" id="warning-full" style="display:none;">
+      ⚠ Внимание: сейчас реальный режим — принтер напечатает ВСЕ накладные.
+    </div>
+    <button onclick="createJob()" id="btn-create">Собрать и поставить на печать</button>
+  </div>
+
+  <div class="card">
+    <h2>Последние сборки</h2>
+    <div id="jobs-list">Загрузка...</div>
+  </div>
+</div>
+
+<script>
+const API = ""; // с root_path=/waybills nginx подставит
+
+async function loadConfig() {
+  const r = await fetch(API + "/config");
+  const cfg = await r.json();
+  const sel = document.getElementById("city");
+  sel.innerHTML = cfg.cities.map(c => `<option value="${c}">${c}</option>`).join("");
+}
+
+function testModeToggle() {
+  const testMode = document.getElementById("test_mode").checked;
+  document.getElementById("warning-full").style.display = testMode ? "none" : "block";
+}
+document.getElementById("test_mode").addEventListener("change", testModeToggle);
+
+async function createJob() {
+  const btn = document.getElementById("btn-create");
+  btn.disabled = true; btn.textContent = "Отправка...";
+  const payload = {
+    city: document.getElementById("city").value,
+    days_back: +document.getElementById("days_back").value,
+    test_mode: document.getElementById("test_mode").checked,
+    test_limit: +document.getElementById("test_limit").value,
+    roll_a_size: +document.getElementById("roll_a").value,
+    roll_b_size: +document.getElementById("roll_b").value,
+    roll_b_threshold: +document.getElementById("roll_b_threshold").value,
+    label_width_mm: +document.getElementById("label_width").value,
+    label_height_mm: +document.getElementById("label_height").value,
+  };
+  const r = await fetch(API + "/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const job = await r.json();
+  btn.disabled = false; btn.textContent = "Собрать и поставить на печать";
+  await refreshJobs();
+}
+
+async function refreshJobs() {
+  const r = await fetch(API + "/jobs");
+  const jobs = await r.json();
+  const container = document.getElementById("jobs-list");
+  if (!jobs.length) {
+    container.innerHTML = "<p style='color:#86868b'>Пока нет запусков.</p>";
+    return;
+  }
+  container.innerHTML = jobs.map(renderJob).join("");
+}
+
+function renderJob(j) {
+  const st = `<span class="badge b-${j.status}">${j.status}</span>`;
+  const dt = new Date(j.created_at + "Z").toLocaleString("ru-RU");
+  const testBadge = j.test_mode ? " <span class='badge b-B'>TEST × " + j.test_limit + "</span>" : "";
+  const files = j.pdf_files.length
+    ? `<div style="margin-top:6px">📄 ${j.pdf_files.map(f =>
+        `<a href="${API}/jobs/${j.id}/pdf/${f}" target="_blank">${f}</a>`).join(" · ")}</div>`
+    : "";
+  const err = j.error ? `<div style="color:#c00;margin-top:6px;font-size:12px">${j.error}</div>` : "";
+  return `
+    <div style="border-top:1px solid #f2f2f7;padding:10px 0">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong>#${j.id} · ${j.city}</strong>${testBadge} ${st}
+          <span style="color:#86868b;font-size:12px;margin-left:8px">${dt}</span>
+        </div>
+      </div>
+      ${j.orders_found ? renderStats(j) : ""}
+      ${files}
+      ${err}
+    </div>`;
+}
+
+function renderStats(j) {
+  return `
+    <div class="stats" style="margin-top:8px">
+      <div class="stat"><div class="stat-label">Найдено</div><div class="stat-value">${j.orders_found}</div></div>
+      <div class="stat"><div class="stat-label">Группа A</div><div class="stat-value">${j.group_a_count}</div></div>
+      <div class="stat"><div class="stat-label">Группа B</div><div class="stat-value">${j.group_b_count}</div></div>
+      <div class="stat"><div class="stat-label">Группа C</div><div class="stat-value">${j.group_c_count}</div></div>
+      <div class="stat"><div class="stat-label">Фильтр: чужой ПВЗ</div><div class="stat-value">${j.orders_filtered_pickup}</div></div>
+      <div class="stat"><div class="stat-label">Фильтр: уже переданы</div><div class="stat-value">${j.orders_filtered_transmitted}</div></div>
+    </div>`;
+}
+
+loadConfig();
+refreshJobs();
+setInterval(refreshJobs, 3000);
+</script>
+</body>
+</html>
