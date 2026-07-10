@@ -40,6 +40,19 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
     }
   }
 
+  async function handleUnmarkPrinted() {
+    if (!confirm("Отменить отметку «Напечатано»?\n\nЭти заказы снова войдут в следующую сборку.")) return;
+    setMarkingPrinted(true);
+    try {
+      const updated = await api.unmarkPrinted(job.id);
+      onMarkPrinted(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setMarkingPrinted(false);
+    }
+  }
+
   const st = STATUS[job.status] ?? { label: job.status, color: "text-gray-600 bg-gray-100", border: "border-l-gray-300" };
   const isRunning   = ["pending", "parsing"].includes(job.status);
   const canRetry    = ["done", "error", "pdf_ready"].includes(job.status);
@@ -147,9 +160,22 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
 
               {/* Напечатано */}
               {isPrinted ? (
-                <div className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-green-50 border-2 border-green-200 text-green-700">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
-                  Напечатано
+                <div className="flex items-center rounded-xl border-2 border-green-700 overflow-hidden">
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-green-700 text-white text-xs font-semibold">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+                    Напечатано
+                  </div>
+                  <button
+                    onClick={handleUnmarkPrinted}
+                    disabled={markingPrinted}
+                    title="Отменить"
+                    className="px-2.5 py-2 text-green-700 bg-green-50 hover:bg-green-100 border-l-2 border-green-700 disabled:opacity-40 transition-colors"
+                  >
+                    {markingPrinted
+                      ? <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
+                      : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    }
+                  </button>
                 </div>
               ) : canMarkPrinted && (
                 <button

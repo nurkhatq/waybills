@@ -208,6 +208,22 @@ def mark_printed(
     return job_to_dict(job)
 
 
+@app.post("/jobs/{job_id}/unmark-printed")
+def unmark_printed(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    job.printed_at = None
+    db.commit()
+    return job_to_dict(job)
+
+
 @app.post("/jobs/{job_id}/retry")
 def retry_job(
     job_id: int,

@@ -99,6 +99,7 @@ export const api = {
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),
 
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
+  unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),
 
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,
