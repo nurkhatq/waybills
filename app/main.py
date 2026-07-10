@@ -43,9 +43,6 @@ class JobCreate(BaseModel):
     days_back: int = Field(7, ge=1, le=14)
     test_mode: bool = False
     test_limit: int = Field(5, ge=1, le=50)
-    roll_a_size: int = Field(250, ge=1, le=500)
-    roll_b_size: int = Field(100, ge=1, le=250)
-    roll_b_threshold: int = Field(100, ge=1, le=250)
     label_width_mm: float = Field(75.0, gt=0, lt=300)
     label_height_mm: float = Field(120.0, gt=0, lt=300)
 
@@ -163,9 +160,6 @@ def create_job(payload: JobCreate, background: BackgroundTasks, db: Session = De
         days_back=payload.days_back,
         test_mode=payload.test_mode,
         test_limit=payload.test_limit,
-        roll_a_size=payload.roll_a_size,
-        roll_b_size=payload.roll_b_size,
-        roll_b_threshold=payload.roll_b_threshold,
         label_width_mm=payload.label_width_mm,
         label_height_mm=payload.label_height_mm,
     )

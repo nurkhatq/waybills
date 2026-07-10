@@ -88,21 +88,6 @@
       </div>
     </div>
     <div class="row">
-      <div class="field">
-        <label>Рулон А, шт (полный)</label>
-        <input type="number" id="roll_a" value="250" min="1" max="500">
-      </div>
-      <div class="field">
-        <label>Рулон Б, шт (маленький)</label>
-        <input type="number" id="roll_b" value="100" min="1" max="250">
-      </div>
-      <div class="field">
-        <label>Остаток ≤ N на ролле Б</label>
-        <input type="number" id="roll_b_threshold" value="100" min="1" max="250">
-        <div class="hint">Если хвост меньше, идёт на маленький рулон</div>
-      </div>
-    </div>
-    <div class="row">
       <div class="field checkbox">
         <input type="checkbox" id="test_mode" checked>
         <label for="test_mode">Тестовый режим (напечатать только N штук)</label>
@@ -153,9 +138,6 @@ async function createJob() {
     days_back: +document.getElementById("days_back").value,
     test_mode: document.getElementById("test_mode").checked,
     test_limit: +document.getElementById("test_limit").value,
-    roll_a_size: +document.getElementById("roll_a").value,
-    roll_b_size: +document.getElementById("roll_b").value,
-    roll_b_threshold: +document.getElementById("roll_b_threshold").value,
     label_width_mm: +document.getElementById("label_width").value,
     label_height_mm: +document.getElementById("label_height").value,
   };
