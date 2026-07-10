@@ -45,14 +45,35 @@ export interface OrderEntry {
   offer?: { code?: string; name?: string; merchantSku?: string };
 }
 
-export interface AssemblyOrder {
-  id: string;
+export interface AssemblyJob {
+  id: number;
+  city: string;
+  status: string; // pending | fetching | ready | transmitting | done | error
+  progress: number;
+  progress_label: string;
+  orders_found: number;
+  orders_transmitted: number;
+  error: string | null;
+  created_at: string;
+}
+
+export interface AssemblyOrderItem {
+  id: number;
+  kaspi_order_id: string;
   code: string;
-  name: string;
-  offer_code: string;
+  name: string | null;
+  offer_code: string | null;
   quantity: number;
   base_price: number;
-  pickup_point_id: string;
+  transmitted: boolean;
+  transmitted_ok: boolean | null;
+}
+
+export interface AssemblyOrdersPage {
+  total: number;
+  page: number;
+  size: number;
+  orders: AssemblyOrderItem[];
 }
 
 export interface JobOrder {
@@ -136,14 +157,20 @@ export const api = {
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
   unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),
 
-  assemblyOrders: (city: string, days_back = 7) =>
-    req<AssemblyOrder[]>(`/assembly?city=${city}&days_back=${days_back}`),
+  startAssemblyFetch: (city: string) =>
+    req<AssemblyJob>(`/assembly/fetch?city=${city}`, { method: "POST" }),
 
-  transmitOrders: (city: string, orders: { id: string; code: string }[]) =>
-    req<{ results: { id: string; code: string; ok: boolean }[] }>("/assembly/transmit", {
-      method: "POST",
-      body: JSON.stringify({ city, orders }),
-    }),
+  getAssemblyJob: (id: number) =>
+    req<AssemblyJob>(`/assembly/job/${id}`),
+
+  getAssemblyJobOrders: (id: number, page = 0, size = 50) =>
+    req<AssemblyOrdersPage>(`/assembly/job/${id}/orders?page=${page}&size=${size}`),
+
+  startAssemblyTransmit: (id: number) =>
+    req<AssemblyJob>(`/assembly/job/${id}/transmit`, { method: "POST" }),
+
+  getLatestAssemblyJob: (city: string) =>
+    req<AssemblyJob | null>(`/assembly/latest?city=${city}`),
 
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,

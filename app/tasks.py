@@ -31,6 +31,112 @@ def _update_progress(db: Session, job: models.Job, progress: int, label: str = "
     db.commit()
 
 
+@celery.task(name="tasks.fetch_assembly_job", bind=True, max_retries=0)
+def fetch_assembly_job(self, job_id: int):
+    db = SessionLocal()
+    try:
+        job = db.get(models.AssemblyJob, job_id)
+        if not job:
+            return
+        job.status = "fetching"
+        job.progress = 5
+        job.progress_label = "Подключаемся к Kaspi..."
+        db.commit()
+
+        orders = kaspi.fetch_assembly_orders(job.city, days_back=7)
+
+        job.progress = 80
+        job.progress_label = f"Найдено {len(orders)} заказов..."
+        db.commit()
+
+        # Delete old orders for this job (shouldn't exist, but just in case)
+        db.query(models.AssemblyOrder).filter(models.AssemblyOrder.job_id == job_id).delete()
+
+        for o in orders:
+            db.add(models.AssemblyOrder(
+                job_id=job_id,
+                kaspi_order_id=o["id"],
+                code=o["code"],
+                name=o.get("name", ""),
+                offer_code=o.get("offer_code", ""),
+                quantity=o.get("quantity", 1),
+                base_price=o.get("base_price", 0.0),
+            ))
+
+        job.orders_found = len(orders)
+        job.status = "ready"
+        job.progress = 100
+        job.progress_label = ""
+        db.commit()
+
+        # Cleanup: keep only last 3 assembly jobs per city (delete older ones)
+        old_jobs = (
+            db.query(models.AssemblyJob)
+            .filter(models.AssemblyJob.city == job.city, models.AssemblyJob.id != job_id)
+            .order_by(models.AssemblyJob.id.desc())
+            .offset(2)
+            .all()
+        )
+        for old in old_jobs:
+            db.delete(old)
+        db.commit()
+
+    except Exception as e:
+        logger.exception(f"fetch_assembly_job {job_id} failed")
+        job = db.get(models.AssemblyJob, job_id)
+        if job:
+            job.status = "error"
+            job.error = str(e)
+            db.commit()
+    finally:
+        db.close()
+
+
+@celery.task(name="tasks.transmit_assembly_job", bind=True, max_retries=0)
+def transmit_assembly_job(self, job_id: int):
+    db = SessionLocal()
+    try:
+        job = db.get(models.AssemblyJob, job_id)
+        if not job:
+            return
+        job.status = "transmitting"
+        job.progress = 0
+        db.commit()
+
+        orders = (
+            db.query(models.AssemblyOrder)
+            .filter(models.AssemblyOrder.job_id == job_id, models.AssemblyOrder.transmitted == False)
+            .all()
+        )
+        total = len(orders)
+        done = 0
+
+        for o in orders:
+            ok = kaspi.assemble_order(o.kaspi_order_id, o.code)
+            o.transmitted = True
+            o.transmitted_ok = ok
+            done += 1
+            job.progress = int(done / total * 100) if total else 100
+            job.progress_label = f"Отправлено {done} / {total}"
+            db.commit()
+
+        job.orders_transmitted = sum(1 for o in orders if o.transmitted_ok)
+        job.status = "done"
+        job.progress = 100
+        job.progress_label = ""
+        db.commit()
+
+    except Exception as e:
+        logger.exception(f"transmit_assembly_job {job_id} failed")
+        job = db.get(models.AssemblyJob, job_id)
+        if job:
+            job.status = "error"
+            job.error = str(e)
+            db.commit()
+    finally:
+        db.close()
+
+
 @celery.task(name="tasks.process_job", bind=True, max_retries=0)
 def process_job(self, job_id: int):
     db = SessionLocal()

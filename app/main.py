@@ -344,41 +344,131 @@ def download_pdf(
     return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
-class AssembleItem(BaseModel):
-    id: str
-    code: str
+def assembly_job_to_dict(job: models.AssemblyJob) -> dict:
+    return {
+        "id": job.id,
+        "city": job.city,
+        "status": job.status,
+        "progress": job.progress or 0,
+        "progress_label": job.progress_label or "",
+        "orders_found": job.orders_found or 0,
+        "orders_transmitted": job.orders_transmitted or 0,
+        "error": job.error,
+        "created_at": job.created_at,
+    }
 
-class AssemblePayload(BaseModel):
-    city: str
-    orders: list[AssembleItem]
 
-
-@app.get("/assembly")
-def get_assembly_orders(
+@app.post("/assembly/fetch")
+def start_assembly_fetch(
     city: str = Query(...),
-    days_back: int = Query(7, ge=1, le=14),
+    db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     if user.get("role") not in ("admin", "manager") and city != user.get("city"):
         raise HTTPException(403, "Нет доступа")
-    try:
-        return kaspi.fetch_assembly_orders(city, days_back)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    if city not in kaspi.pickup_points_map():
+        raise HTTPException(400, f"Unknown city: {city}")
+
+    job = models.AssemblyJob(city=city)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    tasks.fetch_assembly_job.delay(job.id)
+    return assembly_job_to_dict(job)
 
 
-@app.post("/assembly/transmit")
-def transmit_assembly_orders(
-    payload: AssemblePayload,
+@app.get("/assembly/latest")
+def get_latest_assembly_job(
+    city: str = Query(...),
+    db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    if user.get("role") not in ("admin", "manager") and payload.city != user.get("city"):
+    if user.get("role") not in ("admin", "manager") and city != user.get("city"):
         raise HTTPException(403, "Нет доступа")
-    results = []
-    for item in payload.orders:
-        ok = kaspi.assemble_order(item.id, item.code)
-        results.append({"id": item.id, "code": item.code, "ok": ok})
-    return {"results": results}
+    job = (
+        db.query(models.AssemblyJob)
+        .filter(models.AssemblyJob.city == city)
+        .order_by(models.AssemblyJob.id.desc())
+        .first()
+    )
+    if not job:
+        return None
+    return assembly_job_to_dict(job)
+
+
+@app.get("/assembly/job/{job_id}")
+def get_assembly_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.AssemblyJob, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    return assembly_job_to_dict(job)
+
+
+@app.get("/assembly/job/{job_id}/orders")
+def get_assembly_job_orders(
+    job_id: int,
+    page: int = Query(0, ge=0),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.AssemblyJob, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    total = db.query(models.AssemblyOrder).filter(models.AssemblyOrder.job_id == job_id).count()
+    orders = (
+        db.query(models.AssemblyOrder)
+        .filter(models.AssemblyOrder.job_id == job_id)
+        .offset(page * size)
+        .limit(size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "size": size,
+        "orders": [
+            {
+                "id": o.id,
+                "kaspi_order_id": o.kaspi_order_id,
+                "code": o.code,
+                "name": o.name,
+                "offer_code": o.offer_code,
+                "quantity": o.quantity,
+                "base_price": o.base_price,
+                "transmitted": o.transmitted,
+                "transmitted_ok": o.transmitted_ok,
+            }
+            for o in orders
+        ],
+    }
+
+
+@app.post("/assembly/job/{job_id}/transmit")
+def start_assembly_transmit(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.AssemblyJob, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    if job.status not in ("ready",):
+        raise HTTPException(400, f"Job not ready: {job.status}")
+    tasks.transmit_assembly_job.delay(job_id)
+    job.status = "transmitting"
+    db.commit()
+    return assembly_job_to_dict(job)
 
 
 # ---------- Agent API ----------

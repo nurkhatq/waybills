@@ -97,3 +97,36 @@ class PrintTask(Base):
     created_at = Column(DateTime, default=now)
 
     job = relationship("Job", back_populates="print_tasks")
+
+
+class AssemblyJob(Base):
+    __tablename__ = "assembly_jobs"
+
+    id = Column(Integer, primary_key=True)
+    city = Column(String, nullable=False, index=True)
+    status = Column(String, default="pending")  # pending | fetching | ready | transmitting | done | error
+    progress = Column(Integer, default=0)
+    progress_label = Column(Text, nullable=True)
+    orders_found = Column(Integer, default=0)
+    orders_transmitted = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+    orders = relationship("AssemblyOrder", back_populates="job", cascade="all, delete-orphan")
+
+
+class AssemblyOrder(Base):
+    __tablename__ = "assembly_orders"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("assembly_jobs.id"), nullable=False, index=True)
+    kaspi_order_id = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    offer_code = Column(String, nullable=True)
+    quantity = Column(Integer, default=1)
+    base_price = Column(Float, default=0.0)
+    transmitted = Column(Boolean, default=False)
+    transmitted_ok = Column(Boolean, nullable=True)
+
+    job = relationship("AssemblyJob", back_populates="orders")
