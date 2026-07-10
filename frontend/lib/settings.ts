@@ -11,13 +11,19 @@ export function loadSettings(defaultCity: string): AppSettings {
   if (typeof window === "undefined") return defaults(defaultCity);
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...defaults(defaultCity), ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // city always comes from user account, never from localStorage
+      return { ...defaults(defaultCity), ...saved, city: defaultCity };
+    }
   } catch { /* ignore */ }
   return defaults(defaultCity);
 }
 
 export function saveSettings(s: AppSettings): void {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  // don't persist city — it's always driven by the user account
+  const { city: _city, ...rest } = s;
+  localStorage.setItem(KEY, JSON.stringify(rest));
 }
 
 function defaults(city: string): AppSettings {
