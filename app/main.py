@@ -6,12 +6,14 @@ import os
 from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from . import kaspi, models, tasks
+from .auth import get_current_user, login_via_wms
 from .config import settings
 from .db import get_db, init_db
 
@@ -27,7 +29,14 @@ app = FastAPI(
     root_path="/waybills",
 )
 
-# Инициализация БД
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 init_db()
 os.makedirs(settings.data_dir, exist_ok=True)
 
@@ -38,6 +47,11 @@ if os.path.isdir(STATIC_DIR):
 
 # ---------- Схемы ----------
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 class JobCreate(BaseModel):
     city: str = Field(..., description="almaty | astana | shymkent")
     days_back: int = Field(7, ge=1, le=14)
@@ -45,46 +59,6 @@ class JobCreate(BaseModel):
     test_limit: int = Field(5, ge=1, le=50)
     label_width_mm: float = Field(75.0, gt=0, lt=300)
     label_height_mm: float = Field(120.0, gt=0, lt=300)
-
-
-class JobResponse(BaseModel):
-    id: int
-    city: str
-    status: str
-    error: Optional[str]
-    orders_found: int
-    orders_filtered_pickup: int
-    orders_filtered_status: int
-    orders_filtered_transmitted: int
-    group_a_count: int
-    group_b_count: int
-    group_c_count: int
-    pdf_files: list
-    test_mode: bool
-    test_limit: int
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-    class Config:
-        from_attributes = True
-
-
-class PrintTaskResponse(BaseModel):
-    id: int
-    job_id: int
-    city: str
-    pdf_filename: str
-    pdf_size_bytes: int
-    waybills_count: int
-    roll_type: str
-    status: str
-    error: Optional[str]
-    created_at: datetime.datetime
-    claimed_at: Optional[datetime.datetime]
-    completed_at: Optional[datetime.datetime]
-
-    class Config:
-        from_attributes = True
 
 
 def job_to_dict(job: models.Job) -> dict:
@@ -103,6 +77,9 @@ def job_to_dict(job: models.Job) -> dict:
         "pdf_files": json.loads(job.pdf_files_json) if job.pdf_files_json else [],
         "test_mode": job.test_mode,
         "test_limit": job.test_limit,
+        "days_back": job.days_back,
+        "label_width_mm": job.label_width_mm,
+        "label_height_mm": job.label_height_mm,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -125,6 +102,18 @@ def print_task_to_dict(t: models.PrintTask) -> dict:
     }
 
 
+# ---------- Auth ----------
+
+@app.post("/auth/login")
+def auth_login(payload: LoginRequest):
+    return login_via_wms(payload.username, payload.password)
+
+
+@app.get("/auth/me")
+def auth_me(user: dict = Depends(get_current_user)):
+    return user
+
+
 # ---------- UI ----------
 
 @app.get("/", response_class=HTMLResponse)
@@ -133,14 +122,13 @@ def index():
 
 
 @app.get("/config")
-def get_config():
+def get_config(user: dict = Depends(get_current_user)):
     return {
         "cities": list(kaspi.pickup_points_map().keys()),
+        "user_city": user.get("city", "almaty"),
+        "role": user.get("role", "operator"),
         "defaults": {
             "days_back": 7,
-            "roll_a_size": settings.roll_a_size,
-            "roll_b_size": settings.roll_b_size,
-            "roll_b_threshold": settings.roll_b_threshold,
             "label_width_mm": settings.label_width_mm,
             "label_height_mm": settings.label_height_mm,
             "test_limit": 5,
@@ -150,8 +138,17 @@ def get_config():
 
 # ---------- Jobs ----------
 
-@app.post("/jobs", response_model=JobResponse)
-def create_job(payload: JobCreate, background: BackgroundTasks, db: Session = Depends(get_db)):
+@app.post("/jobs")
+def create_job(
+    payload: JobCreate,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    # Оператор может создавать только для своего города
+    if user.get("role") not in ("admin", "manager") and payload.city != user.get("city"):
+        raise HTTPException(403, "Вы можете создавать сборки только для своего склада")
+
     if payload.city not in kaspi.pickup_points_map():
         raise HTTPException(400, f"Unknown city: {payload.city}")
 
@@ -166,27 +163,64 @@ def create_job(payload: JobCreate, background: BackgroundTasks, db: Session = De
     db.add(job)
     db.commit()
     db.refresh(job)
-
     background.add_task(tasks.process_job, job.id)
     return job_to_dict(job)
 
 
 @app.get("/jobs")
-def list_jobs(limit: int = 20, db: Session = Depends(get_db)):
-    jobs = db.query(models.Job).order_by(models.Job.id.desc()).limit(limit).all()
-    return [job_to_dict(j) for j in jobs]
+def list_jobs(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    q = db.query(models.Job).order_by(models.Job.id.desc())
+    # Операторы видят только свой город
+    if user.get("role") not in ("admin", "manager"):
+        q = q.filter(models.Job.city == user.get("city"))
+    return [job_to_dict(j) for j in q.limit(limit).all()]
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: int, db: Session = Depends(get_db)):
+def get_job(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    return job_to_dict(job)
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(
+    job_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Создаёт новый job с теми же параметрами что исходный."""
+    src = db.get(models.Job, job_id)
+    if not src:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and src.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+
+    job = models.Job(
+        city=src.city,
+        days_back=src.days_back,
+        test_mode=src.test_mode,
+        test_limit=src.test_limit,
+        label_width_mm=src.label_width_mm,
+        label_height_mm=src.label_height_mm,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    background.add_task(tasks.process_job, job.id)
     return job_to_dict(job)
 
 
 @app.get("/jobs/{job_id}/tasks")
-def get_job_tasks(job_id: int, db: Session = Depends(get_db)):
+def get_job_tasks(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
     tasks_list = (
         db.query(models.PrintTask)
         .filter(models.PrintTask.job_id == job_id)
@@ -196,12 +230,34 @@ def get_job_tasks(job_id: int, db: Session = Depends(get_db)):
     return [print_task_to_dict(t) for t in tasks_list]
 
 
+def _resolve_user(authorization: Optional[str], token: Optional[str]) -> dict:
+    """Принимает токен из заголовка или query-параметра (для PDF-ссылок в браузере)."""
+    from .auth import get_current_user as _gcu
+    if token and not authorization:
+        authorization = f"Bearer {token}"
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Требуется авторизация")
+    from .auth import decode_jwt
+    payload = decode_jwt(authorization.split(" ", 1)[1])
+    if not payload or "sub" not in payload:
+        raise HTTPException(401, "Токен недействителен или истёк")
+    return payload
+
+
 @app.get("/jobs/{job_id}/pdf/{filename}")
-def download_pdf(job_id: int, filename: str, db: Session = Depends(get_db)):
+def download_pdf(
+    job_id: int,
+    filename: str,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    user = _resolve_user(authorization, token)
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    # Защита от path traversal
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(400, "Bad filename")
     path = os.path.join(settings.data_dir, str(job_id), filename)
@@ -210,7 +266,7 @@ def download_pdf(job_id: int, filename: str, db: Session = Depends(get_db)):
     return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
-# ---------- Agent API (для скриптов на складе) ----------
+# ---------- Agent API ----------
 
 def _check_agent(auth: Optional[str]):
     if not auth or auth != f"Bearer {settings.agent_token}":
@@ -223,7 +279,6 @@ def agent_next_task(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Агент запрашивает следующую задачу для своего города."""
     _check_agent(authorization)
     t = (
         db.query(models.PrintTask)
@@ -275,7 +330,6 @@ def agent_complete_task(
     t.status = "done" if payload.ok else "error"
     t.error = payload.error
     db.commit()
-    # Если все таски job готовы — job.status = "done"
     remaining = (
         db.query(models.PrintTask)
         .filter(models.PrintTask.job_id == t.job_id, models.PrintTask.status.in_(["queued", "claimed"]))

@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # Секрет для агента
     agent_token: str = "change-me-in-production"
 
+    # JWT для UI
+    secret_key: str = "waybills-secret-change-in-production"
+
+    # WMS backend (для проксирования логина)
+    wms_url: str = "http://127.0.0.1:8000"
+
     # Целевой размер термо-этикетки, мм → pt (1 mm = 2.83465 pt)
     label_width_mm: float = 75.0
     label_height_mm: float = 120.0
