@@ -268,6 +268,35 @@ def retry_job(
     return job_to_dict(job)
 
 
+@app.get("/jobs/{job_id}/orders")
+def get_job_orders(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    orders = (
+        db.query(models.Order)
+        .filter(models.Order.job_id == job_id)
+        .order_by(models.Order.id)
+        .all()
+    )
+    return [
+        {
+            "id": o.id,
+            "order_code": o.order_code,
+            "waybill_number": o.waybill_number,
+            "num_positions": o.num_positions,
+            "total_qty": o.total_qty,
+            "group_letter": o.group_letter,
+            "max_freq": o.max_freq,
+            "primary_sku": o.primary_sku,
+            "entries": json.loads(o.entries_json) if o.entries_json else [],
+        }
+        for o in orders
+    ]
+
+
 @app.get("/jobs/{job_id}/tasks")
 def get_job_tasks(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
     tasks_list = (

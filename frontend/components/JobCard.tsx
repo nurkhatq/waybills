@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Job, api } from "@/lib/api";
 
 const CITY_LABEL: Record<string, string> = {
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props) {
+  const router = useRouter();
   const [printingFile, setPrintingFile] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
 
@@ -104,7 +106,10 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
           <div className="flex-1 min-w-0">
 
             {/* Header row */}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
+            <button
+              onClick={() => router.push(`/jobs/${job.id}`)}
+              className="flex items-center justify-between gap-2 flex-wrap w-full text-left hover:opacity-80 transition-opacity"
+            >
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-mono text-gray-400">#{job.id}</span>
                 <span className="font-semibold text-gray-900 text-sm">{CITY_LABEL[job.city] ?? job.city}</span>
@@ -115,8 +120,11 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
                 )}
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span>
               </div>
-              <time className="text-xs text-gray-400 tabular-nums shrink-0">{date}</time>
-            </div>
+              <div className="flex items-center gap-2">
+                <time className="text-xs text-gray-400 tabular-nums">{date}</time>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+              </div>
+            </button>
 
             {/* Actions */}
             <div className="mt-3 flex flex-wrap items-center gap-2">

@@ -31,6 +31,8 @@ def init_db():
             "ALTER TABLE jobs ADD COLUMN progress_label TEXT DEFAULT ''",
             "ALTER TABLE jobs ADD COLUMN printed_at TIMESTAMP",
             "ALTER TABLE jobs ADD COLUMN orders_printed INTEGER",
+            "ALTER TABLE orders ADD COLUMN primary_sku TEXT",
+            "ALTER TABLE orders ADD COLUMN entries_json TEXT",
         ]:
             try:
                 conn.execute(text(stmt))

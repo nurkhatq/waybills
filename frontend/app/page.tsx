@@ -27,14 +27,27 @@ function SkeletonCard() {
 
 export default function Dashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [firstLoad, setFirstLoad] = useState(true);
-  const [tab, setTab] = useState<"create" | "history">("create");
+  const [tab, setTab] = useState<"create" | "history">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "history"
+      ? "history"
+      : "create"
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  function setTabAndUrl(t: "create" | "history") {
+    setTab(t);
+    const url = new URL(window.location.href);
+    if (t === "history") url.searchParams.set("tab", "history");
+    else url.searchParams.delete("tab");
+    window.history.replaceState(null, "", url.toString());
+  }
 
   useEffect(() => {
     const u = loadUser();
@@ -81,7 +94,7 @@ export default function Dashboard() {
     try {
       const newJob = await api.retryJob(job.id);
       setJobs((prev) => [newJob, ...prev]);
-      setTab("history");
+      setTabAndUrl("history");
     } catch (err) {
       alert(err instanceof Error ? err.message : "Ошибка повтора");
     } finally {
@@ -175,7 +188,7 @@ export default function Dashboard() {
           {(["create", "history"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => setTabAndUrl(t)}
               className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
                 tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
               }`}

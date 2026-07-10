@@ -37,6 +37,25 @@ export interface User {
   role: string;
 }
 
+export interface OrderEntry {
+  name?: string;
+  quantity?: number;
+  offer?: { code?: string; merchantSku?: string };
+  unitPrice?: number;
+}
+
+export interface JobOrder {
+  id: number;
+  order_code: string;
+  waybill_number: string | null;
+  num_positions: number;
+  total_qty: number;
+  group_letter: string;
+  max_freq: number;
+  primary_sku: string;
+  entries: OrderEntry[];
+}
+
 export interface Job {
   id: number;
   city: string;
@@ -100,6 +119,8 @@ export const api = {
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),
 
   deleteAllJobs: () => req<{ deleted: number }>("/jobs", { method: "DELETE" }),
+
+  jobOrders: (id: number) => req<JobOrder[]>(`/jobs/${id}/orders`),
 
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
   unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),

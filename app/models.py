@@ -71,6 +71,8 @@ class Order(Base):
     total_qty = Column(Integer, default=1)
     group_letter = Column(String, nullable=True)  # A / B / C
     max_freq = Column(Integer, default=0)
+    primary_sku = Column(String, nullable=True)
+    entries_json = Column(Text, nullable=True)  # JSON array of entry attributes
     print_status = Column(String, default="pending")  # pending | printed | skipped | failed
 
     job = relationship("Job", back_populates="orders")

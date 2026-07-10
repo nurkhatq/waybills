@@ -103,6 +103,8 @@ def process_job(self, job_id: int):
                 total_qty=o["total_qty"],
                 group_letter=o["group_letter"],
                 max_freq=o["max_freq"],
+                primary_sku=o.get("primary_sku", ""),
+                entries_json=json.dumps(o.get("entries", []), ensure_ascii=False),
             ))
 
         job.group_a_count = sum(1 for o in sorted_orders if o["group_letter"] == "A")
