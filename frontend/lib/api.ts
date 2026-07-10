@@ -1,4 +1,5 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://194.238.41.18/waybills";
+// В браузере запросы идут через /api → Vercel proxy → VPS (избегаем mixed content)
+const BASE = "/api";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
