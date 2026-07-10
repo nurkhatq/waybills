@@ -27,7 +27,6 @@ function SkeletonCard() {
 
 export default function Dashboard() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
