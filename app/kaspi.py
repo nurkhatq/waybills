@@ -215,20 +215,23 @@ def fetch_assembly_orders(city: str, days_back: int = 7) -> list:
 def assemble_order(order_id: str, order_code: str) -> bool:
     session = make_session()
     try:
+        body = json.dumps({
+            "data": {
+                "type": "orders",
+                "id": order_id,
+                "attributes": {
+                    "code": order_code,
+                    "status": "ASSEMBLE",
+                },
+            }
+        })
         r = session.post(
             f"{settings.kaspi_api_base}/orders",
-            json={
-                "data": {
-                    "type": "orders",
-                    "id": order_id,
-                    "attributes": {
-                        "code": order_code,
-                        "status": "ASSEMBLE",
-                    },
-                }
-            },
+            data=body,
             timeout=15,
         )
+        if not r.ok:
+            logger.warning(f"assemble_order {order_code}: {r.status_code} {r.text[:200]}")
         return r.ok
     except Exception as e:
         logger.warning(f"assemble_order {order_code} failed: {e}")

@@ -463,8 +463,13 @@ def start_assembly_transmit(
         raise HTTPException(404, "Job not found")
     if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
         raise HTTPException(403, "Нет доступа")
-    if job.status not in ("ready",):
+    if job.status not in ("ready", "done"):
         raise HTTPException(400, f"Job not ready: {job.status}")
+    # Reset transmitted flags so we can retry
+    db.query(models.AssemblyOrder).filter(
+        models.AssemblyOrder.job_id == job_id
+    ).update({"transmitted": False, "transmitted_ok": None})
+    job.orders_transmitted = 0
     tasks.transmit_assembly_job.delay(job_id)
     job.status = "transmitting"
     db.commit()
