@@ -49,6 +49,9 @@ class Job(Base):
     # Пользователь подтвердил что накладные напечатаны
     printed_at = Column(DateTime, nullable=True)
 
+    # Сколько накладных реально ушло в PDF (после дедупликации)
+    orders_printed = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

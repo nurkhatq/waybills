@@ -160,6 +160,7 @@ def process_job(self, job_id: int):
         ))
 
         job.pdf_files_json = json.dumps([filename])
+        job.orders_printed = print_count
         _update_progress(db, job, 100, "")
         _update_status(db, job, "pdf_ready")
     except Exception as e:

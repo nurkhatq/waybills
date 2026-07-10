@@ -43,6 +43,7 @@ export interface Job {
   status: string;
   error: string | null;
   orders_found: number;
+  orders_printed: number | null;
   orders_filtered_pickup: number;
   orders_filtered_status: number;
   orders_filtered_transmitted: number;
