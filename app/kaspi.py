@@ -49,7 +49,7 @@ def fetch_ready_orders(city: str, days_back: int = 7, progress_cb=None) -> Dict:
     end_ts = int(now.timestamp() * 1000)
 
     ready_orders: List[Dict] = []
-    stats = {"filtered_pickup": 0, "filtered_status": 0, "filtered_transmitted": 0}
+    stats = {"filtered_pickup": 0, "filtered_status": 0, "filtered_transmitted": 0, "filtered_express": 0}
     page = 0
     while True:
         r = session.get(
@@ -89,6 +89,9 @@ def fetch_ready_orders(city: str, days_back: int = 7, progress_cb=None) -> Dict:
             kd = a.get("kaspiDelivery") or {}
             if kd.get("courierTransmissionDate") is not None:
                 stats["filtered_transmitted"] += 1
+                continue
+            if kd.get("express"):
+                stats["filtered_express"] += 1
                 continue
 
             entry_ids = [
