@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import StatusBadge from "./StatusBadge";
 import { Job, api } from "@/lib/api";
 
@@ -15,6 +16,18 @@ interface Props {
 }
 
 export default function JobCard({ job, onRetry, retrying }: Props) {
+  const [printingFile, setPrintingFile] = useState<string | null>(null);
+
+  async function handlePrint(filename: string) {
+    setPrintingFile(filename);
+    try {
+      await api.printPdf(job.id, filename);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка печати");
+    } finally {
+      setPrintingFile(null);
+    }
+  }
   const date = new Date(job.created_at + "Z").toLocaleString("ru-RU", {
     day: "2-digit",
     month: "2-digit",
@@ -85,16 +98,32 @@ export default function JobCard({ job, onRetry, retrying }: Props) {
       {job.pdf_files.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {job.pdf_files.map((f) => (
-            <a
-              key={f}
-              href={api.pdfUrl(job.id, f)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm hover:bg-blue-100 transition"
-            >
-              <span>📄</span>
-              <span>{f}</span>
-            </a>
+            <div key={f} className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+              <span className="text-sm text-gray-500">📄</span>
+              <span className="text-xs text-gray-600 mr-1">{f}</span>
+              <button
+                onClick={() => handlePrint(f)}
+                disabled={printingFile === f}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white text-xs font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {printingFile === f ? (
+                  <>
+                    <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    Загрузка...
+                  </>
+                ) : (
+                  <>🖨 Печать</>
+                )}
+              </button>
+              <a
+                href={api.pdfUrl(job.id, f)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition"
+              >
+                ↗
+              </a>
+            </div>
           ))}
         </div>
       )}

@@ -97,6 +97,37 @@ export const api = {
 
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,
+
+  printPdf: async (jobId: number, filename: string): Promise<void> => {
+    const url = `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;";
+    iframe.src = blobUrl;
+    document.body.appendChild(iframe);
+
+    await new Promise<void>((resolve, reject) => {
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      };
+      iframe.onerror = () => reject(new Error("Не удалось загрузить PDF"));
+    });
+
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      URL.revokeObjectURL(blobUrl);
+    }, 60_000);
+  },
 };
 
 export function saveSession(token: string, user: User) {
