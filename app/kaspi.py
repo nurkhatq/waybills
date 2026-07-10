@@ -125,3 +125,111 @@ def download_waybill_pdf(waybill_url: str) -> bytes:
     r = session.get(waybill_url, timeout=30)
     r.raise_for_status()
     return r.content
+
+
+def fetch_assembly_orders(city: str, days_back: int = 7) -> list:
+    """
+    Заказы в статусе упаковки (assembled=False), только одиночные, без экспресс.
+    """
+    mapping = pickup_points_map()
+    pickup_point_id = mapping.get(city)
+    if not pickup_point_id:
+        raise ValueError(f"Unknown city: {city}")
+
+    session = make_session()
+    now = datetime.datetime.now(tz=TZ_KZ)
+    start = (now - datetime.timedelta(days=days_back)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    start_ts = int(start.timestamp() * 1000)
+    end_ts = int(now.timestamp() * 1000)
+
+    result = []
+    page = 0
+    while True:
+        r = session.get(
+            f"{settings.kaspi_api_base}/orders",
+            params={
+                "page[number]": page,
+                "page[size]": 100,
+                "filter[orders][creationDate][$ge]": start_ts,
+                "filter[orders][creationDate][$le]": end_ts,
+                "filter[orders][state]": "KASPI_DELIVERY",
+                "include[orders]": "entries",
+                "sort": "creationDate",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        orders = data.get("data", [])
+        included = data.get("included", [])
+        if not orders:
+            break
+
+        entry_lookup = {
+            item["id"]: item.get("attributes", {})
+            for item in included
+            if item.get("type") == "orderentries"
+        }
+
+        for o in orders:
+            a = o.get("attributes", {})
+            if a.get("pickupPointId") != pickup_point_id:
+                continue
+            if a.get("status") != "ACCEPTED_BY_MERCHANT":
+                continue
+            if a.get("assembled"):  # already assembled — skip
+                continue
+            kd = a.get("kaspiDelivery") or {}
+            if kd.get("express"):  # skip express
+                continue
+
+            entry_ids = [
+                e["id"]
+                for e in o.get("relationships", {}).get("entries", {}).get("data", [])
+            ]
+            entries = [entry_lookup.get(eid, {}) for eid in entry_ids if entry_lookup.get(eid)]
+            if len(entries) != 1:  # only single-position orders
+                continue
+
+            e = entries[0]
+            offer = e.get("offer") or {}
+            result.append({
+                "id": o["id"],
+                "code": str(a.get("code", "")),
+                "name": offer.get("name", ""),
+                "offer_code": offer.get("code", ""),
+                "quantity": e.get("quantity", 1),
+                "base_price": e.get("basePrice", 0),
+                "pickup_point_id": pickup_point_id,
+            })
+
+        if len(orders) < 100:
+            break
+        page += 1
+
+    return result
+
+
+def assemble_order(order_id: str, order_code: str) -> bool:
+    session = make_session()
+    try:
+        r = session.post(
+            f"{settings.kaspi_api_base}/orders",
+            json={
+                "data": {
+                    "type": "orders",
+                    "id": order_id,
+                    "attributes": {
+                        "code": order_code,
+                        "status": "ASSEMBLE",
+                    },
+                }
+            },
+            timeout=15,
+        )
+        return r.ok
+    except Exception as e:
+        logger.warning(f"assemble_order {order_code} failed: {e}")
+        return False

@@ -38,10 +38,21 @@ export interface User {
 }
 
 export interface OrderEntry {
-  name?: string;
   quantity?: number;
-  offer?: { code?: string; merchantSku?: string };
-  unitPrice?: number;
+  basePrice?: number;
+  totalPrice?: number;
+  category?: { code?: string; title?: string };
+  offer?: { code?: string; name?: string; merchantSku?: string };
+}
+
+export interface AssemblyOrder {
+  id: string;
+  code: string;
+  name: string;
+  offer_code: string;
+  quantity: number;
+  base_price: number;
+  pickup_point_id: string;
 }
 
 export interface JobOrder {
@@ -124,6 +135,15 @@ export const api = {
 
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
   unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),
+
+  assemblyOrders: (city: string, days_back = 7) =>
+    req<AssemblyOrder[]>(`/assembly?city=${city}&days_back=${days_back}`),
+
+  transmitOrders: (city: string, orders: { id: string; code: string }[]) =>
+    req<{ results: { id: string; code: string; ok: boolean }[] }>("/assembly/transmit", {
+      method: "POST",
+      body: JSON.stringify({ city, orders }),
+    }),
 
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,

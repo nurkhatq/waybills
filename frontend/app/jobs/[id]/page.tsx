@@ -27,7 +27,7 @@ function orderMatchesSearch(order: JobOrder, q: string): boolean {
   if (order.waybill_number?.toLowerCase().includes(lower)) return true;
   if (order.primary_sku?.toLowerCase().includes(lower)) return true;
   for (const e of order.entries) {
-    if (e.name?.toLowerCase().includes(lower)) return true;
+    if (e.offer?.name?.toLowerCase().includes(lower)) return true;
     const code = e.offer?.code ?? "";
     if (code.toLowerCase().includes(lower)) return true;
     if (getEntryMaster(code).toLowerCase().includes(lower)) return true;
@@ -220,25 +220,34 @@ function OrderRow({ order, index }: { order: JobOrder; index: number }) {
             )}
           </div>
           {order.entries.length > 0 && (
-            <p className="text-xs text-gray-700 mt-0.5 truncate">
-              {order.entries.map((e) => e.name).filter(Boolean).join(", ")}
+            <p className="text-sm text-gray-800 mt-0.5 truncate">
+              {order.entries.map((e) => e.offer?.name).filter(Boolean).join(", ")}
             </p>
           )}
         </div>
 
-        <div className="shrink-0 flex items-center gap-2">
-          <span className="text-xs text-gray-400 tabular-nums">{order.total_qty} шт</span>
-          <svg
-            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"
-            className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}
-          >
-            <polyline points="9,18 15,12 9,6"/>
-          </svg>
+        <div className="shrink-0 flex flex-col items-end gap-0.5">
+          <span className="text-xs font-semibold text-gray-900 tabular-nums">
+            {order.entries.reduce((sum, e) => sum + (e.basePrice ?? 0) * (e.quantity ?? 1), 0) > 0
+              ? order.entries.reduce((sum, e) => sum + (e.basePrice ?? 0) * (e.quantity ?? 1), 0).toLocaleString("ru-RU") + " ₸"
+              : `${order.total_qty} шт`}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {order.entries.reduce((sum, e) => sum + (e.basePrice ?? 0) * (e.quantity ?? 1), 0) > 0 && (
+              <span className="text-[10px] text-gray-400 tabular-nums">{order.total_qty} шт</span>
+            )}
+            <svg
+              width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"
+              className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+            >
+              <polyline points="9,18 15,12 9,6"/>
+            </svg>
+          </div>
         </div>
       </button>
 
       {open && (
-        <div className="border-t-2 border-gray-100 px-4 py-3 space-y-2 bg-gray-50/50">
+        <div className="border-t-2 border-gray-100 px-4 py-3 space-y-3 bg-gray-50/50">
           {order.entries.map((e, i) => {
             const offerCode = e.offer?.code ?? "";
             const masterSku = getEntryMaster(offerCode);
@@ -246,19 +255,24 @@ function OrderRow({ order, index }: { order: JobOrder; index: number }) {
               <div key={i} className="flex items-start gap-3">
                 <span className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 text-[10px] font-bold text-gray-600 mt-0.5">{i + 1}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-900">{e.name ?? "—"}</p>
-                  <div className="flex flex-wrap gap-2 mt-1">
+                  <p className="text-sm font-semibold text-gray-900 leading-snug">{e.offer?.name ?? "—"}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {masterSku && (
-                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{masterSku}</span>
+                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{masterSku}</span>
                     )}
                     {e.offer?.merchantSku && e.offer.merchantSku !== masterSku && (
-                      <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{e.offer.merchantSku}</span>
+                      <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{e.offer.merchantSku}</span>
                     )}
-                    <span className="text-[10px] text-gray-500">{e.quantity} шт</span>
-                    {e.unitPrice != null && (
-                      <span className="text-[10px] text-gray-400">{e.unitPrice.toLocaleString("ru-RU")} ₸</span>
+                    {e.category?.title && (
+                      <span className="text-[10px] text-gray-500 bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{e.category.title}</span>
                     )}
                   </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  {e.basePrice != null && (
+                    <div className="text-xs font-semibold text-gray-900 tabular-nums">{e.basePrice.toLocaleString("ru-RU")} ₸</div>
+                  )}
+                  <div className="text-[10px] text-gray-400 mt-0.5">{e.quantity ?? 1} шт</div>
                 </div>
               </div>
             );

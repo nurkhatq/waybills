@@ -344,6 +344,43 @@ def download_pdf(
     return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
+class AssembleItem(BaseModel):
+    id: str
+    code: str
+
+class AssemblePayload(BaseModel):
+    city: str
+    orders: list[AssembleItem]
+
+
+@app.get("/assembly")
+def get_assembly_orders(
+    city: str = Query(...),
+    days_back: int = Query(7, ge=1, le=14),
+    user: dict = Depends(get_current_user),
+):
+    if user.get("role") not in ("admin", "manager") and city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    try:
+        return kaspi.fetch_assembly_orders(city, days_back)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/assembly/transmit")
+def transmit_assembly_orders(
+    payload: AssemblePayload,
+    user: dict = Depends(get_current_user),
+):
+    if user.get("role") not in ("admin", "manager") and payload.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    results = []
+    for item in payload.orders:
+        ok = kaspi.assemble_order(item.id, item.code)
+        results.append({"id": item.id, "code": item.code, "ok": ok})
+    return {"results": results}
+
+
 # ---------- Agent API ----------
 
 def _check_agent(auth: Optional[str]):

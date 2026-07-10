@@ -6,6 +6,7 @@ import { loadSettings, AppSettings } from "@/lib/settings";
 import CreateJobForm from "@/components/CreateJobForm";
 import JobCard from "@/components/JobCard";
 import SettingsPanel from "@/components/SettingsPanel";
+import AssemblyPanel from "@/components/AssemblyPanel";
 
 function SkeletonCard() {
   return (
@@ -33,17 +34,20 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [firstLoad, setFirstLoad] = useState(true);
-  const [tab, setTab] = useState<"create" | "history">(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "history"
-      ? "history"
-      : "create"
-  );
+  const [tab, setTab] = useState<"create" | "history" | "assembly">(() => {
+    if (typeof window !== "undefined") {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      if (t === "history") return "history";
+      if (t === "assembly") return "assembly";
+    }
+    return "create";
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  function setTabAndUrl(t: "create" | "history") {
+  function setTabAndUrl(t: "create" | "history" | "assembly") {
     setTab(t);
     const url = new URL(window.location.href);
-    if (t === "history") url.searchParams.set("tab", "history");
+    if (t === "history" || t === "assembly") url.searchParams.set("tab", t);
     else url.searchParams.delete("tab");
     window.history.replaceState(null, "", url.toString());
   }
@@ -103,7 +107,7 @@ export default function Dashboard() {
 
   function handleCreated(job: Job) {
     setJobs((prev) => [job, ...prev]);
-    setTab("history");
+    setTabAndUrl("history");
   }
 
   async function handleDeleteAll() {
@@ -184,7 +188,7 @@ export default function Dashboard() {
 
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-200 rounded-xl p-1 w-fit">
-          {(["create", "history"] as const).map((t) => (
+          {(["create", "history", "assembly"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTabAndUrl(t)}
@@ -192,7 +196,7 @@ export default function Dashboard() {
                 tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
               }`}
             >
-              {t === "create" ? "Сборка" : `История${jobs.length ? ` (${jobs.length})` : ""}`}
+              {t === "create" ? "Сборка" : t === "history" ? `История${jobs.length ? ` (${jobs.length})` : ""}` : "Склад"}
             </button>
           ))}
         </div>
@@ -201,6 +205,13 @@ export default function Dashboard() {
         {tab === "create" && (
           <div className="bg-white rounded-2xl border-2 border-gray-200 p-6 animate-slide-up">
             <CreateJobForm settings={settings} onCreated={handleCreated} />
+          </div>
+        )}
+
+        {/* Assembly tab */}
+        {tab === "assembly" && (
+          <div className="animate-slide-up">
+            <AssemblyPanel settings={settings} />
           </div>
         )}
 
