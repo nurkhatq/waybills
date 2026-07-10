@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # WMS backend (для проксирования логина)
     wms_url: str = "http://127.0.0.1:8000"
 
+    # Redis — DB 1 (WMS использует DB 0)
+    redis_url: str = "redis://127.0.0.1:6379/1"
+
     # Целевой размер термо-этикетки, мм → pt (1 mm = 2.83465 pt)
     label_width_mm: float = 75.0
     label_height_mm: float = 120.0

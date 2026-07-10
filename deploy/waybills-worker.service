@@ -1,0 +1,21 @@
+[Unit]
+Description=Waybills — Celery worker
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/waybills
+EnvironmentFile=/opt/waybills/.env
+Environment="PATH=/opt/waybills/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/waybills/.venv/bin/celery -A app.celery_app:celery worker \
+    --loglevel=info \
+    --concurrency=2 \
+    --queues=celery \
+    --logfile=/var/log/waybills-worker.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

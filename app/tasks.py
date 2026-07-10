@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Фоновая задача обработки job: парсит Kaspi, генерит PDF, ставит в очередь на печать.
+Выполняется Celery-воркером — не зависит от веб-процесса.
 """
 import json
 import logging
@@ -10,6 +11,7 @@ import traceback
 from sqlalchemy.orm import Session
 
 from . import kaspi, pdf_service, models
+from .celery_app import celery
 from .config import settings
 from .db import SessionLocal
 
@@ -23,7 +25,8 @@ def _update_status(db: Session, job: models.Job, status: str, error: str = None)
     db.commit()
 
 
-def process_job(job_id: int):
+@celery.task(name="tasks.process_job", bind=True, max_retries=0)
+def process_job(self, job_id: int):
     db = SessionLocal()
     try:
         job = db.get(models.Job, job_id)

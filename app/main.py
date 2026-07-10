@@ -5,7 +5,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header, Query
+from fastapi import Depends, FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -141,7 +141,6 @@ def get_config(user: dict = Depends(get_current_user)):
 @app.post("/jobs")
 def create_job(
     payload: JobCreate,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -163,7 +162,7 @@ def create_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background.add_task(tasks.process_job, job.id)
+    tasks.process_job.delay(job.id)
     return job_to_dict(job)
 
 
@@ -193,7 +192,6 @@ def get_job(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get
 @app.post("/jobs/{job_id}/retry")
 def retry_job(
     job_id: int,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -215,7 +213,7 @@ def retry_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background.add_task(tasks.process_job, job.id)
+    tasks.process_job.delay(job.id)
     return job_to_dict(job)
 
 
