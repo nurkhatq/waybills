@@ -50,6 +50,8 @@ export interface Job {
   group_b_count: number;
   group_c_count: number;
   pdf_files: string[];
+  progress: number;
+  progress_label: string;
   test_mode: boolean;
   test_limit: number;
   days_back: number;

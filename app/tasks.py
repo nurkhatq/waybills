@@ -25,6 +25,12 @@ def _update_status(db: Session, job: models.Job, status: str, error: str = None)
     db.commit()
 
 
+def _update_progress(db: Session, job: models.Job, progress: int, label: str = ""):
+    job.progress = progress
+    job.progress_label = label
+    db.commit()
+
+
 @celery.task(name="tasks.process_job", bind=True, max_retries=0)
 def process_job(self, job_id: int):
     db = SessionLocal()
@@ -35,6 +41,7 @@ def process_job(self, job_id: int):
             return
 
         _update_status(db, job, "parsing")
+        _update_progress(db, job, 5, "Получаем заказы от Kaspi...")
 
         # 1) Парсим Kaspi
         result = kaspi.fetch_ready_orders(job.city, job.days_back)
@@ -48,14 +55,16 @@ def process_job(self, job_id: int):
         db.commit()
 
         if not orders:
+            _update_progress(db, job, 100, "")
             _update_status(db, job, "done", "Нет заказов, готовых к передаче.")
             return
+
+        _update_progress(db, job, 15, f"Найдено {len(orders)} заказов, сортируем...")
 
         # 2) Сортировка + группировка
         freq_map = pdf_service.build_frequency_map(orders)
         sorted_orders = pdf_service.classify_and_sort(orders, freq_map)
 
-        # Сохраняем заказы в БД
         for o in sorted_orders:
             db.add(models.Order(
                 job_id=job.id,
@@ -72,10 +81,16 @@ def process_job(self, job_id: int):
         job.group_c_count = sum(1 for o in sorted_orders if o["group_letter"] == "C")
         db.commit()
 
-        # 3) Скачиваем накладные для сорт. заказов
-        # В тестовом режиме — те же самые заказы, но при печати ограничим до test_limit
+        # 3) Скачиваем накладные
+        orders_to_download = sorted_orders[:job.test_limit] if job.test_mode else sorted_orders
+        total_to_download = len(orders_to_download)
         orders_pdfs = []
-        for o in sorted_orders:
+
+        for i, o in enumerate(orders_to_download):
+            # Прогресс 20% → 80% по мере скачивания
+            pct = 20 + int((i / total_to_download) * 60)
+            _update_progress(db, job, pct, f"Скачиваем накладные {i + 1} / {total_to_download}")
+
             kd = o["attrs"].get("kaspiDelivery") or {}
             url = kd.get("waybill")
             if not url:
@@ -86,12 +101,13 @@ def process_job(self, job_id: int):
             except Exception as e:
                 logger.warning(f"Order {o['code']}: waybill download failed: {e}")
 
-        # 4) Генерим один PDF на все накладные
+        # 4) Генерим PDF
+        _update_progress(db, job, 85, "Собираем PDF...")
         data_dir = os.path.join(settings.data_dir, str(job.id))
         os.makedirs(data_dir, exist_ok=True)
 
         total_count = len(orders_pdfs)
-        print_pdfs = orders_pdfs[:job.test_limit] if job.test_mode else orders_pdfs
+        print_pdfs = orders_pdfs
         print_count = len(print_pdfs)
 
         pdf_bytes = pdf_service.build_pdf_for_orders(
@@ -115,6 +131,7 @@ def process_job(self, job_id: int):
         ))
 
         job.pdf_files_json = json.dumps([filename])
+        _update_progress(db, job, 100, "")
         _update_status(db, job, "pdf_ready")
     except Exception as e:
         logger.exception(f"Job {job_id} failed")

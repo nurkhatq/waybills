@@ -75,6 +75,8 @@ def job_to_dict(job: models.Job) -> dict:
         "group_b_count": job.group_b_count,
         "group_c_count": job.group_c_count,
         "pdf_files": json.loads(job.pdf_files_json) if job.pdf_files_json else [],
+        "progress": job.progress or 0,
+        "progress_label": job.progress_label or "",
         "test_mode": job.test_mode,
         "test_limit": job.test_limit,
         "days_back": job.days_back,

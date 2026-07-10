@@ -42,6 +42,10 @@ class Job(Base):
     # PDF файлы (JSON-массив имён файлов в data/<job_id>/)
     pdf_files_json = Column(Text, nullable=True)
 
+    # Прогресс обработки
+    progress = Column(Integer, default=0)
+    progress_label = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

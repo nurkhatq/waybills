@@ -22,4 +22,16 @@ def get_db():
 
 def init_db():
     from . import models  # noqa: F401
+    from sqlalchemy import text
     Base.metadata.create_all(bind=engine)
+    # Добавляем новые колонки если их ещё нет (SQLite не поддерживает IF NOT EXISTS в ALTER)
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE jobs ADD COLUMN progress INTEGER DEFAULT 0",
+            "ALTER TABLE jobs ADD COLUMN progress_label TEXT DEFAULT ''",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass

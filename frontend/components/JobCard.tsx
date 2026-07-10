@@ -28,6 +28,7 @@ export default function JobCard({ job, onRetry, retrying }: Props) {
   const st = STATUS[job.status] ?? { label: job.status, color: "text-gray-600 bg-gray-100", border: "border-l-gray-300" };
   const isRunning = ["pending", "parsing"].includes(job.status);
   const canRetry  = ["done", "error", "pdf_ready"].includes(job.status);
+  const pct = job.progress ?? 0;
 
   const date = new Date(job.created_at + "Z").toLocaleString("ru-RU", {
     day: "2-digit", month: "2-digit", year: "2-digit",
@@ -47,10 +48,19 @@ export default function JobCard({ job, onRetry, retrying }: Props) {
 
   return (
     <div className={`bg-white rounded-2xl border-2 border-gray-200 border-l-4 ${st.border} overflow-hidden animate-slide-up transition-shadow hover:shadow-md`}>
-      {/* Running shimmer */}
+      {/* Progress bar */}
       {isRunning && (
-        <div className="h-0.5 overflow-hidden">
-          <div className="h-full animate-shimmer" />
+        <div className="px-5 pt-4 pb-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-gray-500">{job.progress_label || "Обрабатываем..."}</span>
+            <span className="text-xs font-semibold text-gray-700 tabular-nums">{pct}%</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="h-full bg-gray-900 rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
       )}
 
