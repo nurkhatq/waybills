@@ -35,6 +35,7 @@ def classify_and_sort(orders: List[Dict], freq_map: "collections.Counter") -> Li
         unique_offers = set()
         total_qty = 0
         max_freq = 0
+        primary_sku = ""
         for e in o["entries"]:
             offer_code = (e.get("offer") or {}).get("code", "")
             master = offer_code.rsplit("_", 1)[0] if "_" in offer_code else offer_code
@@ -42,6 +43,7 @@ def classify_and_sort(orders: List[Dict], freq_map: "collections.Counter") -> Li
             total_qty += e.get("quantity") or 0
             if freq_map.get(master, 0) > max_freq:
                 max_freq = freq_map[master]
+                primary_sku = master
         num_positions = len(unique_offers)
         if num_positions == 1 and total_qty == 1:
             group = "A"
@@ -53,11 +55,13 @@ def classify_and_sort(orders: List[Dict], freq_map: "collections.Counter") -> Li
         o["total_qty"] = total_qty
         o["group_letter"] = group
         o["max_freq"] = max_freq
+        o["primary_sku"] = primary_sku
 
     orders.sort(
         key=lambda o: (
             {"A": 0, "B": 1, "C": 2}[o["group_letter"]],
             -o["max_freq"],
+            o["primary_sku"],
             -o["total_qty"],
             o["code"],
         )
