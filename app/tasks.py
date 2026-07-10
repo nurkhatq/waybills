@@ -59,6 +59,35 @@ def process_job(self, job_id: int):
             _update_status(db, job, "done", "Нет заказов, готовых к передаче.")
             return
 
+        # Исключаем заказы из уже подтверждённых (напечатанных) сборок того же города
+        printed_jobs = (
+            db.query(models.Job)
+            .filter(
+                models.Job.city == job.city,
+                models.Job.printed_at.isnot(None),
+                models.Job.id != job.id,
+            )
+            .all()
+        )
+        if printed_jobs:
+            printed_ids = {pj.id for pj in printed_jobs}
+            already_printed = {
+                o.order_code
+                for o in db.query(models.Order).filter(models.Order.job_id.in_(printed_ids)).all()
+            }
+            before = len(orders)
+            orders = [o for o in orders if o["code"] not in already_printed]
+            skipped = before - len(orders)
+            if skipped:
+                job.orders_filtered_transmitted = (job.orders_filtered_transmitted or 0) + skipped
+                db.commit()
+                logger.info(f"Job {job.id}: исключено {skipped} уже напечатанных заказов")
+
+        if not orders:
+            _update_progress(db, job, 100, "")
+            _update_status(db, job, "done", "Все заказы уже были напечатаны ранее.")
+            return
+
         _update_progress(db, job, 15, f"Найдено {len(orders)} заказов, сортируем...")
 
         # 2) Сортировка + группировка

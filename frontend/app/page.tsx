@@ -72,6 +72,10 @@ export default function Dashboard() {
     router.replace("/login");
   }
 
+  function handleMarkPrinted(updated: Job) {
+    setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
+  }
+
   async function handleRetry(job: Job) {
     setRetryingId(job.id);
     try {
@@ -182,7 +186,7 @@ export default function Dashboard() {
         {tab === "history" && (
           <div className="space-y-3">
             {activeJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} />
             ))}
 
             {firstLoad && <><SkeletonCard /><SkeletonCard /></>}
@@ -200,7 +204,7 @@ export default function Dashboard() {
             )}
 
             {doneJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} />
             ))}
           </div>
         )}

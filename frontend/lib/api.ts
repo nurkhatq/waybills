@@ -52,6 +52,7 @@ export interface Job {
   pdf_files: string[];
   progress: number;
   progress_label: string;
+  printed_at: string | null;
   test_mode: boolean;
   test_limit: number;
   days_back: number;
@@ -96,6 +97,8 @@ export const api = {
   }) => req<Job>("/jobs", { method: "POST", body: JSON.stringify(payload) }),
 
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),
+
+  markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
 
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,

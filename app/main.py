@@ -77,6 +77,7 @@ def job_to_dict(job: models.Job) -> dict:
         "pdf_files": json.loads(job.pdf_files_json) if job.pdf_files_json else [],
         "progress": job.progress or 0,
         "progress_label": job.progress_label or "",
+        "printed_at": job.printed_at,
         "test_mode": job.test_mode,
         "test_limit": job.test_limit,
         "days_back": job.days_back,
@@ -188,6 +189,22 @@ def get_job(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get
         raise HTTPException(404, "Job not found")
     if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
         raise HTTPException(403, "Нет доступа")
+    return job_to_dict(job)
+
+
+@app.post("/jobs/{job_id}/mark-printed")
+def mark_printed(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    job.printed_at = datetime.datetime.utcnow()
+    db.commit()
     return job_to_dict(job)
 
 

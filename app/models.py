@@ -46,6 +46,9 @@ class Job(Base):
     progress = Column(Integer, default=0)
     progress_label = Column(Text, nullable=True)
 
+    # Пользователь подтвердил что накладные напечатаны
+    printed_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

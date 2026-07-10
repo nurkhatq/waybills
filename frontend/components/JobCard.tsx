@@ -20,14 +20,31 @@ interface Props {
   job: Job;
   onRetry: (job: Job) => void;
   retrying: boolean;
+  onMarkPrinted: (job: Job) => void;
 }
 
-export default function JobCard({ job, onRetry, retrying }: Props) {
+export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props) {
   const [printingFile, setPrintingFile] = useState<string | null>(null);
+  const [markingPrinted, setMarkingPrinted] = useState(false);
+
+  async function handleMarkPrinted() {
+    if (!confirm("Подтвердите: накладные распечатаны и переданы на склад?\n\nЭти заказы не войдут в следующую сборку.")) return;
+    setMarkingPrinted(true);
+    try {
+      const updated = await api.markPrinted(job.id);
+      onMarkPrinted(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setMarkingPrinted(false);
+    }
+  }
 
   const st = STATUS[job.status] ?? { label: job.status, color: "text-gray-600 bg-gray-100", border: "border-l-gray-300" };
-  const isRunning = ["pending", "parsing"].includes(job.status);
-  const canRetry  = ["done", "error", "pdf_ready"].includes(job.status);
+  const isRunning   = ["pending", "parsing"].includes(job.status);
+  const canRetry    = ["done", "error", "pdf_ready"].includes(job.status);
+  const canMarkPrinted = ["pdf_ready", "done"].includes(job.status) && !job.printed_at;
+  const isPrinted   = !!job.printed_at;
   const pct = job.progress ?? 0;
 
   const date = new Date(job.created_at + "Z").toLocaleString("ru-RU", {
@@ -127,6 +144,27 @@ export default function JobCard({ job, onRetry, retrying }: Props) {
                   </a>
                 </div>
               ))}
+
+              {/* Напечатано */}
+              {isPrinted ? (
+                <div className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-green-50 border-2 border-green-200 text-green-700">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+                  Напечатано
+                </div>
+              ) : canMarkPrinted && (
+                <button
+                  onClick={handleMarkPrinted}
+                  disabled={markingPrinted}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border-2 border-green-300 text-green-700 hover:bg-green-50 hover:border-green-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
+                >
+                  {markingPrinted ? (
+                    <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+                  )}
+                  Напечатано
+                </button>
+              )}
 
               {canRetry && (
                 <button

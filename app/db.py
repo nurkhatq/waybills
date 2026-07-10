@@ -29,6 +29,7 @@ def init_db():
         for stmt in [
             "ALTER TABLE jobs ADD COLUMN progress INTEGER DEFAULT 0",
             "ALTER TABLE jobs ADD COLUMN progress_label TEXT DEFAULT ''",
+            "ALTER TABLE jobs ADD COLUMN printed_at TIMESTAMP",
         ]:
             try:
                 conn.execute(text(stmt))
