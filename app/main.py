@@ -183,6 +183,21 @@ def list_jobs(
     return [job_to_dict(j) for j in q.limit(limit).all()]
 
 
+@app.delete("/jobs")
+def delete_all_jobs(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(403, "Только администратор может очищать историю")
+    db.query(models.PrintTask).delete()
+    db.query(models.Order).delete()
+    count = db.query(models.Job).count()
+    db.query(models.Job).delete()
+    db.commit()
+    return {"deleted": count}
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
     job = db.get(models.Job, job_id)

@@ -94,6 +94,16 @@ export default function Dashboard() {
     setTab("history");
   }
 
+  async function handleDeleteAll() {
+    if (!confirm("Удалить всю историю сборок?\n\nЭто действие необратимо.")) return;
+    try {
+      await api.deleteAllJobs();
+      setJobs([]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка удаления");
+    }
+  }
+
   const activeJobs = jobs.filter((j) => ["pending", "parsing"].includes(j.status));
   const doneJobs   = jobs.filter((j) => !["pending", "parsing"].includes(j.status));
 
@@ -185,6 +195,18 @@ export default function Dashboard() {
         {/* History tab */}
         {tab === "history" && (
           <div className="space-y-3">
+            {!firstLoad && jobs.length > 0 && config && ["admin", "manager"].includes(config.role) && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleDeleteAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg border-2 border-transparent hover:border-red-200 transition-all"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                  Очистить историю
+                </button>
+              </div>
+            )}
+
             {activeJobs.map((j) => (
               <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} />
             ))}

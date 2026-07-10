@@ -99,6 +99,8 @@ export const api = {
 
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),
 
+  deleteAllJobs: () => req<{ deleted: number }>("/jobs", { method: "DELETE" }),
+
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
   unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),
 
