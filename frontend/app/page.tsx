@@ -11,40 +11,52 @@ const CITY_LABEL: Record<string, string> = {
   shymkent: "Шымкент",
 };
 
+function SkeletonCard() {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200/80 p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-4 rounded animate-shimmer" />
+          <div className="w-20 h-4 rounded animate-shimmer" />
+          <div className="w-16 h-5 rounded-full animate-shimmer" />
+        </div>
+        <div className="w-24 h-4 rounded animate-shimmer" />
+      </div>
+      <div className="grid grid-cols-6 gap-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-12 rounded-lg animate-shimmer" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [retryingId, setRetryingId] = useState<number | null>(null);
-  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [firstLoad, setFirstLoad] = useState(true);
   const [tab, setTab] = useState<"create" | "history">("create");
 
-  // Auth check
   useEffect(() => {
     const u = loadUser();
     if (!u) { router.replace("/login"); return; }
     setUser(u);
   }, [router]);
 
-  // Load config
   useEffect(() => {
     if (!user) return;
-    api.config().then(setConfig).catch((err) => {
-      if (err.message === "Unauthorized") return;
-      console.error(err);
-    });
+    api.config().then(setConfig).catch(() => {});
   }, [user]);
 
   const refreshJobs = useCallback(async () => {
     try {
       const data = await api.jobs(30);
       setJobs(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingJobs(false);
-    }
+    } catch { /* will retry next tick */ }
+    finally { setFirstLoad(false); }
   }, []);
 
   useEffect(() => {
@@ -77,103 +89,109 @@ export default function Dashboard() {
     setTab("history");
   }
 
-  // Split jobs
   const activeJobs = jobs.filter((j) => ["pending", "parsing"].includes(j.status));
-  const doneJobs = jobs.filter((j) => !["pending", "parsing"].includes(j.status));
+  const doneJobs   = jobs.filter((j) => !["pending", "parsing"].includes(j.status));
 
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f5f5f7] animate-fade-in">
+
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">📦</span>
-            <span className="font-semibold text-gray-900">Waybills</span>
+      <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200/80">
+        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-7 h-7 bg-[#0071e3] rounded-lg">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+            </div>
+            <span className="font-semibold text-gray-900 tracking-tight">Waybills</span>
             {user && (
-              <span className="hidden sm:inline text-sm text-gray-400 ml-1">
+              <span className="hidden sm:inline text-sm text-gray-400">
                 · {CITY_LABEL[user.city] ?? user.city}
               </span>
             )}
           </div>
+
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600 hidden sm:block">{user?.full_name}</span>
+            <span className="hidden sm:block text-sm text-gray-500">{user?.full_name}</span>
             <button
               onClick={handleLogout}
-              className="text-xs text-gray-500 hover:text-gray-800 transition px-2 py-1 rounded-lg hover:bg-gray-100"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
             >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
               Выйти
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Active jobs banner */}
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+
+        {/* Active banner */}
         {activeJobs.length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
-            <div className="w-4 h-4 rounded-full bg-blue-500 animate-pulse shrink-0" />
-            <div>
+          <div className="flex items-center gap-3 bg-blue-50 border border-blue-200/80 rounded-2xl px-4 py-3 animate-fade-in">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-[pulse-dot_1.2s_ease-in-out_infinite] shrink-0" />
+            <div className="min-w-0">
               <p className="text-sm font-medium text-blue-900">
                 {activeJobs.length === 1
-                  ? `Сборка #${activeJobs[0].id} в процессе...`
+                  ? `Сборка #${activeJobs[0].id} в процессе`
                   : `${activeJobs.length} сборки в процессе`}
               </p>
-              <p className="text-xs text-blue-700 mt-0.5">Страница обновляется автоматически</p>
+              <p className="text-xs text-blue-600 mt-0.5">Обновляется автоматически</p>
             </div>
           </div>
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-gray-200 rounded-xl p-1 w-fit">
+        <div className="flex gap-1 bg-gray-200/70 rounded-xl p-1 w-fit">
           {(["create", "history"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition ${
+              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 ${
                 tab === t
                   ? "bg-white text-gray-900 shadow-sm"
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
-              {t === "create" ? "Новая сборка" : `История${jobs.length ? ` (${jobs.length})` : ""}`}
+              {t === "create"
+                ? "Новая сборка"
+                : `История${jobs.length ? ` (${jobs.length})` : ""}`}
             </button>
           ))}
         </div>
 
-        {/* Tab: Create */}
+        {/* Create tab */}
         {tab === "create" && config && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm p-6 animate-slide-up">
             <h2 className="text-base font-semibold text-gray-900 mb-5">Параметры сборки</h2>
             <CreateJobForm config={config} onCreated={handleCreated} />
           </div>
         )}
 
-        {/* Tab: History */}
+        {/* History tab */}
         {tab === "history" && (
           <div className="space-y-3">
-            {/* Active jobs first */}
             {activeJobs.map((j) => (
-              <JobCard
-                key={j.id}
-                job={j}
-                onRetry={handleRetry}
-                retrying={retryingId === j.id}
-              />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} />
             ))}
 
-            {loadingJobs && doneJobs.length === 0 && (
-              <div className="text-center py-12 text-gray-400 text-sm">Загрузка...</div>
+            {firstLoad && (
+              <>
+                <SkeletonCard />
+                <SkeletonCard />
+              </>
             )}
 
-            {!loadingJobs && jobs.length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-3xl mb-3">📋</div>
-                <p className="text-gray-500 text-sm">Ещё не было ни одной сборки.</p>
+            {!firstLoad && jobs.length === 0 && (
+              <div className="text-center py-16 animate-fade-in">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-white border border-gray-200 rounded-2xl mb-4">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+                </div>
+                <p className="text-sm font-medium text-gray-500">Сборок ещё не было</p>
                 <button
                   onClick={() => setTab("create")}
-                  className="mt-4 text-blue-500 text-sm hover:underline"
+                  className="mt-3 text-sm text-[#0071e3] hover:underline"
                 >
                   Создать первую
                 </button>
@@ -181,12 +199,7 @@ export default function Dashboard() {
             )}
 
             {doneJobs.map((j) => (
-              <JobCard
-                key={j.id}
-                job={j}
-                onRetry={handleRetry}
-                retrying={retryingId === j.id}
-              />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} />
             ))}
           </div>
         )}
