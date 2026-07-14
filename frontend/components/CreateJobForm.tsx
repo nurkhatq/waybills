@@ -15,7 +15,7 @@ interface Props {
 }
 
 export default function CreateJobForm({ settings, onCreated }: Props) {
-  const [testMode, setTestMode] = useState(true);
+  const [testMode, setTestMode] = useState(false);
   const [testLimit, setTestLimit] = useState(5);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -54,13 +54,13 @@ export default function CreateJobForm({ settings, onCreated }: Props) {
       </div>
 
       {/* Test mode */}
-      <div className={`rounded-xl border-2 transition-all duration-200 ${testMode ? "border-amber-300 bg-amber-50" : "border-red-300 bg-red-50"}`}>
+      <div className={`rounded-xl border-2 transition-all duration-200 ${testMode ? "border-red-300 bg-red-50" : "border-green-300 bg-green-50"}`}>
         <div className="flex items-center justify-between px-4 py-3.5">
           <div>
-            <p className={`text-sm font-semibold ${testMode ? "text-amber-900" : "text-red-900"}`}>
+            <p className={`text-sm font-semibold ${testMode ? "text-red-900" : "text-green-900"}`}>
               {testMode ? "Тестовый режим" : "Реальный режим"}
             </p>
-            <p className={`text-xs mt-0.5 ${testMode ? "text-amber-700" : "text-red-600"}`}>
+            <p className={`text-xs mt-0.5 ${testMode ? "text-red-600" : "text-green-700"}`}>
               {testMode
                 ? `Напечатать первые ${testLimit} накладных`
                 : "Принтер напечатает все накладные"}
@@ -74,15 +74,15 @@ export default function CreateJobForm({ settings, onCreated }: Props) {
                 onChange={(e) => setTestLimit(Math.min(50, Math.max(1, Number(e.target.value))))}
                 min={1}
                 max={50}
-                className="w-14 text-center text-sm font-semibold px-2 py-1.5 border-2 border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+                className="w-14 text-center text-sm font-semibold px-2 py-1.5 border-2 border-red-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-red-400/30"
               />
             )}
             <button
               type="button"
               onClick={() => setTestMode(!testMode)}
-              className={`relative inline-flex h-7 w-12 rounded-full transition-colors duration-200 focus:outline-none ${testMode ? "bg-amber-400" : "bg-red-400"}`}
+              className={`relative inline-flex h-7 w-12 rounded-full transition-colors duration-200 focus:outline-none ${testMode ? "bg-red-400" : "bg-green-500"}`}
             >
-              <span className={`inline-block h-5 w-5 mt-1 transform rounded-full bg-white shadow transition-transform duration-200 ${testMode ? "translate-x-6" : "translate-x-1"}`} />
+              <span className={`inline-block h-5 w-5 mt-1 transform rounded-full bg-white shadow transition-transform duration-200 ${testMode ? "translate-x-1" : "translate-x-6"}`} />
             </button>
           </div>
         </div>
