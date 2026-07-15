@@ -52,7 +52,7 @@ def classify_and_sort(orders: List[Dict], freq_map: "collections.Counter", inven
             master = _resolve_sku(offer_code, inventory)
             unique_offers.add(master)
             total_qty += e.get("quantity") or 0
-            if inventory and inventory.is_kit(master):
+            if inventory and inventory.is_kit_for_offer(offer_code):
                 has_kit = True
             if freq_map.get(master, 0) > max_freq:
                 max_freq = freq_map[master]

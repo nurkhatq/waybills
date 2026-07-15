@@ -53,7 +53,20 @@ class Inventory:
         return self._sku_to_main.get(sku, sku)
 
     def is_kit(self, main_sku: str) -> bool:
-        """True если товар — комплект."""
+        """True если товар — комплект (по main_sku)."""
+        info = self._main_info.get(main_sku)
+        return info[1] if info else False
+
+    def is_kit_for_offer(self, offer_code: str) -> bool:
+        """Проверяет kit-статус с приоритетом собственной записи offer_code.
+        Если у offer_code есть своя запись в _main_info — используем её тип,
+        иначе — тип resolved main_sku. Это предотвращает ложные комплекты
+        когда товар (Товар) ошибочно привязан к Комплекту как доп-SKU.
+        """
+        own = self._main_info.get(offer_code)
+        if own is not None:
+            return own[1]
+        main_sku = self._sku_to_main.get(offer_code, offer_code)
         info = self._main_info.get(main_sku)
         return info[1] if info else False
 
