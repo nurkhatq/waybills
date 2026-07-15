@@ -100,6 +100,7 @@ def job_to_dict(job: models.Job) -> dict:
         "group_a_count": job.group_a_count,
         "group_b_count": job.group_b_count,
         "group_c_count": job.group_c_count,
+        "cancel_tasks": json.loads(job.cancel_tasks_json) if job.cancel_tasks_json else [],
         "pdf_files": _parse_pdf_files(
             job.pdf_files_json,
             json.loads(job.printed_files_json) if job.printed_files_json else None,

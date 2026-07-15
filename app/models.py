@@ -60,6 +60,9 @@ class Job(Base):
     # Отслеживание печати по каждому PDF-файлу
     printed_files_json = Column(Text, nullable=True)  # JSON-массив имён файлов, отмеченных напечатанными
 
+    # Задачи на отмену (нехватка товара на складе)
+    cancel_tasks_json = Column(Text, nullable=True)  # [{order_code, sku, name}]
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

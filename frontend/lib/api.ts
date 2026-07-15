@@ -116,6 +116,7 @@ export interface Job {
   group_b_count: number;
   group_c_count: number;
   pdf_files: { filename: string; label: string; count: number | null; printed: boolean }[];
+  cancel_tasks: { order_code: string; sku: string; name: string }[];
   progress: number;
   progress_label: string;
   printed_at: string | null;
@@ -168,7 +169,7 @@ export const api = {
 
   getJobStats: (id: number) => req<SingleStats>(`/jobs/${id}/stats`),
 
-  generateJob: (id: number, selectedBatches: { sku: string; name: string; codes: string[] }[]) =>
+  generateJob: (id: number, selectedBatches: { sku: string; name: string; codes: string[]; available_qty?: number }[]) =>
     req<Job>(`/jobs/${id}/generate`, { method: "POST", body: JSON.stringify({ selected_batches: selectedBatches }) }),
 
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),

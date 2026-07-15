@@ -39,6 +39,7 @@ def init_db():
             "ALTER TABLE jobs ADD COLUMN single_stats_json TEXT",
             "ALTER TABLE jobs ADD COLUMN selected_batches_json TEXT",
             "ALTER TABLE jobs ADD COLUMN printed_files_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN cancel_tasks_json TEXT",
         ]:
             try:
                 conn.execute(text(stmt))

@@ -352,7 +352,6 @@ def generate_pdf_job(self, job_id):
         _update_progress(db, job, 5, "Формируем PDF...")
 
         selected = json.loads(job.selected_batches_json or "[]")
-        selected_codes_set = {code for batch in selected for code in batch.get("codes", [])}
 
         db_orders = (
             db.query(models.Order)
@@ -362,11 +361,20 @@ def generate_pdf_job(self, job_id):
         code_to_order = {o.order_code: o for o in db_orders}
         batches = []
         batch_labels = {}
+        cancel_tasks = []
 
         for i, batch in enumerate(selected):
             batch_pdfs = []
             product_name = batch.get("name", batch["sku"])
             codes = batch.get("codes", [])
+
+            # Ограничиваем по наличию на складе: лишние → задачи на отмену
+            available_qty = batch.get("available_qty")
+            if available_qty is not None and available_qty < len(codes):
+                cancel_codes = codes[available_qty:]
+                codes = codes[:available_qty]
+                for code in cancel_codes:
+                    cancel_tasks.append({"order_code": code, "sku": batch["sku"], "name": product_name})
 
             try:
                 internal_bytes = label_service.build_internal_label(
@@ -401,6 +409,14 @@ def generate_pdf_job(self, job_id):
 
             pct = 5 + int((i + 1) / max(len(selected), 1) * 60)
             _update_progress(db, job, pct, f"Пачка {i + 1} / {len(selected)}")
+
+        # Сохраняем задачи на отмену
+        if cancel_tasks:
+            job.cancel_tasks_json = json.dumps(cancel_tasks, ensure_ascii=False)
+            db.commit()
+
+        # Коды которые вошли в отдельные пачки (после обрезки по наличию)
+        selected_codes_set = {code for prefix, pdfs in batches for code, _ in pdfs if not code.startswith("__internal_")}
 
         _update_progress(db, job, 70, "Формируем общую пачку...")
         common_pdfs = []

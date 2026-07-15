@@ -4,6 +4,58 @@ import { useRouter } from "next/navigation";
 import { Job, api } from "@/lib/api";
 import SmartStatsPanel from "./SmartStatsPanel";
 
+function PdfRow({ f, jobId, printingFile, togglingFile, onPrint, onToggle, archived }: {
+  f: Job["pdf_files"][number];
+  jobId: number;
+  printingFile: string | null;
+  togglingFile: string | null;
+  onPrint: (filename: string) => void;
+  onToggle: (filename: string, printed: boolean) => void;
+  archived?: boolean;
+}) {
+  return (
+    <div className={`flex items-stretch rounded-xl border-2 overflow-hidden transition-colors ${archived ? "border-green-200 opacity-60" : f.printed ? "border-green-300" : "border-gray-200"}`}>
+      <button
+        onClick={() => onPrint(f.filename)}
+        disabled={!!printingFile}
+        className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold text-white active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-1 min-w-0 ${archived ? "bg-gray-500 hover:bg-gray-600" : "bg-gray-900 hover:bg-gray-800"}`}
+      >
+        {printingFile === f.filename
+          ? <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+          : <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        }
+        <span className="flex-1 min-w-0 text-left">
+          {printingFile === f.filename ? "Загрузка..." : (
+            <span className="flex items-baseline gap-1.5">
+              <span className="truncate">{f.label}</span>
+              {f.count != null && <span className="opacity-60 font-normal shrink-0">{f.count} накл.</span>}
+            </span>
+          )}
+        </span>
+      </button>
+      <a href={api.pdfUrl(jobId, f.filename)} target="_blank" rel="noreferrer" title="Открыть PDF"
+         className="shrink-0 flex items-center px-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      <button
+        onClick={() => onToggle(f.filename, f.printed)}
+        disabled={togglingFile === f.filename}
+        title={f.printed ? "Вернуть из архива" : "Отметить напечатанным"}
+        className={`shrink-0 flex items-center px-2.5 border-l-2 transition-colors ${
+          f.printed
+            ? "border-green-300 bg-green-50 text-green-600 hover:bg-green-100"
+            : "border-gray-200 text-gray-300 hover:text-gray-500 hover:bg-gray-50"
+        }`}
+      >
+        {togglingFile === f.filename
+          ? <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
+          : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+        }
+      </button>
+    </div>
+  );
+}
+
 const CITY_LABEL: Record<string, string> = {
   almaty: "Алматы",
   astana: "Астана",
@@ -34,6 +86,8 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, onDelet
   const router = useRouter();
   const [printingFile, setPrintingFile] = useState<string | null>(null);
   const [togglingFile, setTogglingFile] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const isAdmin = role === "admin" || role === "manager";
 
@@ -68,8 +122,11 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, onDelet
   const isStatsReady = job.status === "stats_ready";
   const canRetry     = ["done", "error", "pdf_ready"].includes(job.status);
   const isPrinted    = !!job.printed_at;
-  const hasPdfs      = job.pdf_files.length > 0;
   const pct          = job.progress ?? 0;
+
+  const unprintedFiles = job.pdf_files.filter(f => !f.printed);
+  const printedFiles   = job.pdf_files.filter(f => f.printed);
+  const cancelTasks    = job.cancel_tasks ?? [];
 
   const displayCount = job.orders_printed ?? (job.orders_found > 0 ? job.orders_found : null);
   const borderClass  = isPrinted ? "border-l-green-600" : st.border;
@@ -147,54 +204,58 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, onDelet
             </div>
 
             {/* PDF files */}
-            {hasPdfs && (
+            {job.pdf_files.length > 0 && (
               <div className="mt-3 flex flex-col gap-1.5 w-full">
-                {job.pdf_files.map((f) => (
-                  <div key={f.filename} className={`flex items-stretch rounded-xl border-2 overflow-hidden transition-colors ${f.printed ? "border-green-300" : "border-gray-200"}`}>
-                    {/* Print button */}
-                    <button
-                      onClick={() => handlePrint(f.filename)}
-                      disabled={!!printingFile}
-                      className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-1 min-w-0"
-                    >
-                      {printingFile === f.filename
-                        ? <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
-                        : <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                      }
-                      <span className="flex-1 min-w-0 text-left">
-                        {printingFile === f.filename ? "Загрузка..." : (
-                          <span className="flex items-baseline gap-1.5">
-                            <span className="truncate">{f.label}</span>
-                            {f.count != null && <span className="opacity-60 font-normal shrink-0">{f.count} накл.</span>}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-
-                    {/* Open PDF */}
-                    <a href={api.pdfUrl(job.id, f.filename)} target="_blank" rel="noreferrer" title="Открыть PDF"
-                       className="shrink-0 flex items-center px-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                    </a>
-
-                    {/* Printed checkbox */}
-                    <button
-                      onClick={() => handleToggleFilePrinted(f.filename, f.printed)}
-                      disabled={togglingFile === f.filename}
-                      title={f.printed ? "Снять отметку" : "Отметить напечатанным"}
-                      className={`shrink-0 flex items-center px-2.5 border-l-2 transition-colors ${
-                        f.printed
-                          ? "border-green-300 bg-green-50 text-green-600 hover:bg-green-100"
-                          : "border-gray-200 text-gray-300 hover:text-gray-500 hover:bg-gray-50"
-                      }`}
-                    >
-                      {togglingFile === f.filename
-                        ? <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
-                        : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
-                      }
-                    </button>
-                  </div>
+                {/* Unprinted files */}
+                {unprintedFiles.map((f) => (
+                  <PdfRow key={f.filename} f={f} jobId={job.id} printingFile={printingFile} togglingFile={togglingFile} onPrint={handlePrint} onToggle={handleToggleFilePrinted} />
                 ))}
+
+                {/* Archive toggle */}
+                {printedFiles.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setArchiveOpen(v => !v)}
+                      className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 py-1 transition-colors"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform ${archiveOpen ? "rotate-90" : ""}`}><polyline points="9,18 15,12 9,6"/></svg>
+                      Архив ({printedFiles.length})
+                    </button>
+                    {archiveOpen && (
+                      <div className="flex flex-col gap-1.5 mt-1">
+                        {printedFiles.map((f) => (
+                          <PdfRow key={f.filename} f={f} jobId={job.id} printingFile={printingFile} togglingFile={togglingFile} onPrint={handlePrint} onToggle={handleToggleFilePrinted} archived />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Cancel tasks */}
+                {cancelTasks.length > 0 && (
+                  <div className="mt-1">
+                    <button
+                      onClick={() => setCancelOpen(v => !v)}
+                      className="flex items-center gap-1.5 text-xs text-orange-500 hover:text-orange-700 py-1 transition-colors"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform ${cancelOpen ? "rotate-90" : ""}`}><polyline points="9,18 15,12 9,6"/></svg>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      Задачи на отмену ({cancelTasks.length})
+                    </button>
+                    {cancelOpen && (
+                      <div className="border-2 border-orange-200 bg-orange-50 rounded-xl overflow-hidden divide-y divide-orange-100 mt-1">
+                        {cancelTasks.map((t) => (
+                          <div key={t.order_code} className="flex items-center gap-2 px-3 py-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-gray-800 truncate">{t.name}</p>
+                              <p className="text-[10px] text-gray-400 font-mono">{t.order_code}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
