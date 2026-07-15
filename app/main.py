@@ -68,6 +68,17 @@ class GenerateJobPayload(BaseModel):
     selected_batches: list  # [{sku, name, codes: [...]}, ...]
 
 
+def _parse_pdf_files(raw_json: str | None) -> list:
+    if not raw_json:
+        return []
+    data = json.loads(raw_json)
+    if not data:
+        return []
+    if isinstance(data[0], str):
+        return [{"filename": f, "label": f, "count": None} for f in data]
+    return data
+
+
 def job_to_dict(job: models.Job) -> dict:
     return {
         "id": job.id,
@@ -81,7 +92,7 @@ def job_to_dict(job: models.Job) -> dict:
         "group_a_count": job.group_a_count,
         "group_b_count": job.group_b_count,
         "group_c_count": job.group_c_count,
-        "pdf_files": json.loads(job.pdf_files_json) if job.pdf_files_json else [],
+        "pdf_files": _parse_pdf_files(job.pdf_files_json),
         "orders_printed": job.orders_printed,
         "progress": job.progress or 0,
         "progress_label": job.progress_label or "",

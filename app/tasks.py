@@ -298,13 +298,13 @@ def _run_standard_mode(db, job, orders):
             logger.warning(f"Order {o['code']}: waybill download failed: {e}")
 
     _update_progress(db, job, 85, "Собираем PDF...")
-    _finalize_pdfs(db, job, [("waybills", orders_pdfs)])
+    _finalize_pdfs(db, job, [("waybills", orders_pdfs)], labels={"waybills": "Накладные"})
 
 
-def _finalize_pdfs(db, job, batches):
+def _finalize_pdfs(db, job, batches, labels: dict = None):
     data_dir = os.path.join(settings.data_dir, str(job.id))
     os.makedirs(data_dir, exist_ok=True)
-    filenames = []
+    pdf_files = []
     total_count = 0
 
     for prefix, orders_pdfs in batches:
@@ -328,10 +328,11 @@ def _finalize_pdfs(db, job, batches):
             roll_type="A",
             status="queued",
         ))
-        filenames.append(filename)
+        label = (labels or {}).get(prefix, prefix)
+        pdf_files.append({"filename": filename, "label": label, "count": real_count})
         total_count += real_count
 
-    job.pdf_files_json = json.dumps(filenames)
+    job.pdf_files_json = json.dumps(pdf_files, ensure_ascii=False)
     job.orders_printed = total_count
     _update_progress(db, job, 100, "")
     _update_status(db, job, "pdf_ready")
@@ -360,6 +361,7 @@ def generate_pdf_job(self, job_id):
         )
         code_to_order = {o.order_code: o for o in db_orders}
         batches = []
+        batch_labels = {}
 
         for i, batch in enumerate(selected):
             batch_pdfs = []
@@ -393,7 +395,9 @@ def generate_pdf_job(self, job_id):
 
             if batch_pdfs:
                 safe_sku = batch["sku"].replace("/", "_")[:30]
-                batches.append((f"batch_{i + 1}_{safe_sku}", batch_pdfs))
+                prefix = f"batch_{i + 1}_{safe_sku}"
+                batches.append((prefix, batch_pdfs))
+                batch_labels[prefix] = product_name
 
             pct = 5 + int((i + 1) / max(len(selected), 1) * 60)
             _update_progress(db, job, pct, f"Пачка {i + 1} / {len(selected)}")
@@ -416,9 +420,10 @@ def generate_pdf_job(self, job_id):
 
         if common_pdfs:
             batches.append(("common", common_pdfs))
+            batch_labels["common"] = "Общая пачка"
 
         _update_progress(db, job, 85, "Сохраняем PDF...")
-        _finalize_pdfs(db, job, batches)
+        _finalize_pdfs(db, job, batches, labels=batch_labels)
 
     except Exception as e:
         logger.exception(f"generate_pdf_job {job_id} failed")

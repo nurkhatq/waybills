@@ -115,7 +115,7 @@ export interface Job {
   group_a_count: number;
   group_b_count: number;
   group_c_count: number;
-  pdf_files: string[];
+  pdf_files: { filename: string; label: string; count: number | null }[];
   progress: number;
   progress_label: string;
   printed_at: string | null;
