@@ -254,7 +254,14 @@ def _run_smart_mode_fetch(db, job, orders):
             continue
         if o.get("is_single"):
             sku = o.get("primary_sku", o["code"])
-            name = inv.name(sku) if len(inv) > 0 else sku
+            # Сначала ищем в инвентаре
+            inv_name = inv.name(sku) if len(inv) > 0 else sku
+            if inv_name != sku:
+                name = inv_name
+            else:
+                # Fallback: имя из данных Kaspi (entries[0].offer.name)
+                entries = o.get("entries", [])
+                name = ((entries[0].get("offer") or {}).get("name", "") if entries else "") or sku
             if sku not in single_groups:
                 single_groups[sku] = {"sku": sku, "name": name, "count": 0, "codes": []}
             single_groups[sku]["count"] += 1

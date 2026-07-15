@@ -49,6 +49,19 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartTh
     finally { setMarking(false); }
   }
 
+  function pdfLabel(filename: string): string {
+    const countMatch = filename.match(/_(\d+)pcs\.pdf$/);
+    const count = countMatch ? parseInt(countMatch[1]) : null;
+    const countStr = count !== null ? ` · ${count} накл.` : "";
+    if (filename.startsWith("batch_")) {
+      const num = filename.match(/^batch_(\d+)_/)?.[1] ?? "?";
+      return `Пачка ${num}${countStr}`;
+    }
+    if (filename.startsWith("common_")) return `Общая пачка${countStr}`;
+    if (filename.startsWith("waybills_")) return `Накладные${countStr}`;
+    return filename.replace(/_\d+pcs\.pdf$/, "").replace(/_/g, " ");
+  }
+
   async function handlePrint(filename: string) {
     setPrintingFile(filename);
     try { await api.printPdf(job.id, filename); }
@@ -135,25 +148,29 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartTh
             <div className="mt-3 flex flex-wrap items-center gap-2">
 
               {/* PDF files */}
-              {job.pdf_files.map((f) => (
-                <div key={f} className="flex items-center rounded-xl border-2 border-gray-200 overflow-hidden">
-                  <button
-                    onClick={() => handlePrint(f)}
-                    disabled={!!printingFile}
-                    className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    {printingFile === f
-                      ? <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
-                      : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                    }
-                    {printingFile === f ? "Загрузка..." : "Печать"}
-                  </button>
-                  <a href={api.pdfUrl(job.id, f)} target="_blank" rel="noreferrer" title="Открыть PDF"
-                     className="px-3 py-2 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  </a>
+              {job.pdf_files.length > 0 && (
+                <div className="flex flex-col gap-2 w-full">
+                  {job.pdf_files.map((f) => (
+                    <div key={f} className="flex items-center rounded-xl border-2 border-gray-200 overflow-hidden">
+                      <button
+                        onClick={() => handlePrint(f)}
+                        disabled={!!printingFile}
+                        className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-1"
+                      >
+                        {printingFile === f
+                          ? <svg className="animate-spin shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+                          : <svg className="shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        }
+                        <span className="truncate">{printingFile === f ? "Загрузка..." : pdfLabel(f)}</span>
+                      </button>
+                      <a href={api.pdfUrl(job.id, f)} target="_blank" rel="noreferrer" title="Открыть PDF"
+                         className="shrink-0 px-3 py-2 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
 
               {/* Retry */}
               {canRetry && (
