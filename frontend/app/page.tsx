@@ -139,10 +139,11 @@ export default function Dashboard() {
     return new Date(j.created_at + "Z").toLocaleDateString("ru-RU") === todayStr;
   });
 
-  const smartThreshold = settings.smart_batch_threshold ?? config?.smart_batch_threshold ?? 5;
   const role = config?.role ?? "operator";
 
   if (!user || !settings) return null;
+
+  const smartThreshold = settings.smart_batch_threshold ?? config?.smart_batch_threshold ?? 5;
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] animate-fade-in">
