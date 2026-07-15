@@ -212,7 +212,7 @@ def fetch_assembly_orders(city: str, days_back: int = 7) -> list:
     return result
 
 
-def assemble_order(order_id: str, order_code: str) -> bool:
+def assemble_order(order_id: str, order_code: str, number_of_space: int = 1) -> bool:
     session = make_session()
     try:
         body = json.dumps({
@@ -220,8 +220,8 @@ def assemble_order(order_id: str, order_code: str) -> bool:
                 "type": "orders",
                 "id": order_id,
                 "attributes": {
-                    "code": order_code,
                     "status": "ASSEMBLE",
+                    "numberOfSpace": str(number_of_space),
                 },
             }
         })

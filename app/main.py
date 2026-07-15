@@ -16,6 +16,7 @@ from . import kaspi, models, tasks
 from .auth import get_current_user, login_via_wms
 from .config import settings
 from .db import get_db, init_db
+from .inventory import load_inventory
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +40,7 @@ app.add_middleware(
 
 init_db()
 os.makedirs(settings.data_dir, exist_ok=True)
+load_inventory(settings.inventory_csv_path)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):
@@ -59,6 +61,11 @@ class JobCreate(BaseModel):
     test_limit: int = Field(5, ge=1, le=50)
     label_width_mm: float = Field(75.0, gt=0, lt=300)
     label_height_mm: float = Field(120.0, gt=0, lt=300)
+    smart_mode: bool = False
+
+
+class GenerateJobPayload(BaseModel):
+    selected_batches: list  # [{sku, name, codes: [...]}, ...]
 
 
 def job_to_dict(job: models.Job) -> dict:
@@ -81,6 +88,8 @@ def job_to_dict(job: models.Job) -> dict:
         "printed_at": job.printed_at,
         "test_mode": job.test_mode,
         "test_limit": job.test_limit,
+        "smart_mode": job.smart_mode or False,
+        "single_stats": json.loads(job.single_stats_json) if job.single_stats_json else None,
         "days_back": job.days_back,
         "label_width_mm": job.label_width_mm,
         "label_height_mm": job.label_height_mm,
@@ -137,6 +146,7 @@ def get_config(user: dict = Depends(get_current_user)):
             "label_height_mm": settings.label_height_mm,
             "test_limit": 5,
         },
+        "smart_batch_threshold": settings.smart_batch_threshold,
     }
 
 
@@ -162,6 +172,7 @@ def create_job(
         test_limit=payload.test_limit,
         label_width_mm=payload.label_width_mm,
         label_height_mm=payload.label_height_mm,
+        smart_mode=payload.smart_mode,
     )
     db.add(job)
     db.commit()
@@ -260,6 +271,7 @@ def retry_job(
         test_limit=src.test_limit,
         label_width_mm=src.label_width_mm,
         label_height_mm=src.label_height_mm,
+        smart_mode=src.smart_mode or False,
     )
     db.add(job)
     db.commit()
@@ -295,6 +307,43 @@ def get_job_orders(job_id: int, db: Session = Depends(get_db), user: dict = Depe
         }
         for o in orders
     ]
+
+
+@app.get("/jobs/{job_id}/stats")
+def get_job_stats(job_id: int, db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Smart-mode: возвращает статистику одиночных заказов для выбора пачек."""
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    if not job.single_stats_json:
+        raise HTTPException(400, "Статистика ещё не готова")
+    return {
+        "threshold": settings.smart_batch_threshold,
+        **json.loads(job.single_stats_json),
+    }
+
+
+@app.post("/jobs/{job_id}/generate")
+def generate_job_pdf(
+    job_id: int,
+    payload: GenerateJobPayload,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Smart-mode: пользователь выбрал пачки → запускаем генерацию PDF."""
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+    if job.status != "stats_ready":
+        raise HTTPException(400, f"Job не в статусе stats_ready: {job.status}")
+    job.selected_batches_json = json.dumps(payload.selected_batches, ensure_ascii=False)
+    db.commit()
+    tasks.generate_pdf_job.delay(job.id)
+    return job_to_dict(job)
 
 
 @app.get("/jobs/{job_id}/tasks")

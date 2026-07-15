@@ -107,7 +107,7 @@ export default function Dashboard() {
 
   function handleCreated(job: Job) {
     setJobs((prev) => [job, ...prev]);
-    setTabAndUrl("history");
+    // Остаёмся на вкладке Сборка — сегодняшние задания видны там же
   }
 
   async function handleDeleteAll() {
@@ -120,8 +120,16 @@ export default function Dashboard() {
     }
   }
 
-  const activeJobs = jobs.filter((j) => ["pending", "parsing"].includes(j.status));
-  const doneJobs   = jobs.filter((j) => !["pending", "parsing"].includes(j.status));
+  const runningStatuses = ["pending", "parsing", "stats_ready", "generating"];
+  const activeJobs = jobs.filter((j) => runningStatuses.includes(j.status));
+  const doneJobs   = jobs.filter((j) => !runningStatuses.includes(j.status));
+
+  const todayStr = new Date().toLocaleDateString("ru-RU");
+  const todayJobs = jobs.filter((j) => {
+    return new Date(j.created_at + "Z").toLocaleDateString("ru-RU") === todayStr;
+  });
+
+  const smartThreshold = config?.smart_batch_threshold ?? 5;
 
   if (!user || !settings) return null;
 
@@ -203,8 +211,20 @@ export default function Dashboard() {
 
         {/* Create tab */}
         {tab === "create" && (
-          <div className="bg-white rounded-2xl border-2 border-gray-200 p-6 animate-slide-up">
-            <CreateJobForm settings={settings} onCreated={handleCreated} />
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border-2 border-gray-200 p-6 animate-slide-up">
+              <CreateJobForm settings={settings} onCreated={handleCreated} smartThreshold={smartThreshold} />
+            </div>
+
+            {/* Сегодняшние сборки */}
+            {todayJobs.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">Сегодня</p>
+                {todayJobs.map((j) => (
+                  <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -231,7 +251,7 @@ export default function Dashboard() {
             )}
 
             {activeJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
             ))}
 
             {firstLoad && <><SkeletonCard /><SkeletonCard /></>}
@@ -249,7 +269,7 @@ export default function Dashboard() {
             )}
 
             {doneJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
             ))}
           </div>
         )}

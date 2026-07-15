@@ -41,5 +41,11 @@ class Settings(BaseSettings):
     # Что считать «отсутствием ПВЗ» — маппинг город → pickupPointId
     pickup_points_json: str = '{"almaty":"15142052_PP2","astana":"15142052_PP5","shymkent":"15142052_PP1"}'
 
+    # Инвентарь (CSV с дублями SKU и комплектами)
+    inventory_csv_path: str = "./inventory_export.csv"
+
+    # Smart-mode: порог для авто-выбора отдельной пачки (≥ N одиночных заказов)
+    smart_batch_threshold: int = 5
+
 
 settings = Settings()

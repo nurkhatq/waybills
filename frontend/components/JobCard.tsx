@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Job, api } from "@/lib/api";
+import SmartStatsPanel from "./SmartStatsPanel";
 
 const CITY_LABEL: Record<string, string> = {
   almaty: "Алматы",
@@ -10,11 +11,13 @@ const CITY_LABEL: Record<string, string> = {
 };
 
 const STATUS: Record<string, { label: string; color: string; border: string }> = {
-  pending:   { label: "Ожидание",  color: "text-yellow-700 bg-yellow-100", border: "border-l-yellow-400" },
-  parsing:   { label: "Обработка", color: "text-blue-700 bg-blue-100",     border: "border-l-blue-400" },
-  pdf_ready: { label: "Готов",     color: "text-gray-700 bg-gray-100",     border: "border-l-gray-300" },
-  done:      { label: "Готово",    color: "text-gray-700 bg-gray-100",     border: "border-l-gray-300" },
-  error:     { label: "Ошибка",   color: "text-red-700 bg-red-100",       border: "border-l-red-500" },
+  pending:     { label: "Ожидание",    color: "text-yellow-700 bg-yellow-100",  border: "border-l-yellow-400" },
+  parsing:     { label: "Обработка",   color: "text-blue-700 bg-blue-100",      border: "border-l-blue-400" },
+  stats_ready: { label: "Выбор пачек", color: "text-purple-700 bg-purple-100",  border: "border-l-purple-400" },
+  generating:  { label: "Генерация",   color: "text-blue-700 bg-blue-100",      border: "border-l-blue-400" },
+  pdf_ready:   { label: "Готов",       color: "text-gray-700 bg-gray-100",      border: "border-l-gray-300" },
+  done:        { label: "Готово",      color: "text-gray-700 bg-gray-100",      border: "border-l-gray-300" },
+  error:       { label: "Ошибка",      color: "text-red-700 bg-red-100",        border: "border-l-red-500" },
 };
 
 interface Props {
@@ -22,9 +25,10 @@ interface Props {
   onRetry: (job: Job) => void;
   retrying: boolean;
   onMarkPrinted: (job: Job) => void;
+  smartThreshold?: number;
 }
 
-export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props) {
+export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartThreshold = 5 }: Props) {
   const router = useRouter();
   const [printingFile, setPrintingFile] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
@@ -53,7 +57,8 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
   }
 
   const st = STATUS[job.status] ?? { label: job.status, color: "text-gray-600 bg-gray-100", border: "border-l-gray-300" };
-  const isRunning      = ["pending", "parsing"].includes(job.status);
+  const isRunning      = ["pending", "parsing", "generating"].includes(job.status);
+  const isStatsReady   = job.status === "stats_ready";
   const canRetry       = ["done", "error", "pdf_ready"].includes(job.status);
   const canMarkPrinted = ["pdf_ready", "done"].includes(job.status) && !job.printed_at;
   const isPrinted      = !!job.printed_at;
@@ -184,6 +189,17 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted }: Props
             )}
           </div>
         </div>
+
+        {/* Smart stats panel */}
+        {isStatsReady && job.single_stats && (
+          <div className="mt-4 pt-4 border-t-2 border-purple-100">
+            <SmartStatsPanel
+              job={job}
+              threshold={smartThreshold}
+              onGenerated={onMarkPrinted}
+            />
+          </div>
+        )}
       </div>
 
       {/* Printed footer */}

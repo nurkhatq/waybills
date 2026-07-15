@@ -52,6 +52,11 @@ class Job(Base):
     # Сколько накладных реально ушло в PDF (после дедупликации)
     orders_printed = Column(Integer, nullable=True)
 
+    # Smart-mode: разбивка на одиночные пачки по товару
+    smart_mode = Column(Boolean, default=False)
+    single_stats_json = Column(Text, nullable=True)    # {groups:[{sku,name,count,codes}], non_single_count:N}
+    selected_batches_json = Column(Text, nullable=True)  # [{sku,name,codes:[..]}] — выбор пользователя
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 
@@ -73,6 +78,8 @@ class Order(Base):
     max_freq = Column(Integer, default=0)
     primary_sku = Column(String, nullable=True)
     entries_json = Column(Text, nullable=True)  # JSON array of entry attributes
+    is_single = Column(Boolean, default=False)   # True: 1 позиция × 1 шт × не комплект
+    waybill_url = Column(Text, nullable=True)    # URL накладной Kaspi (для повторного скачивания)
     print_status = Column(String, default="pending")  # pending | printed | skipped | failed
 
     job = relationship("Job", back_populates="orders")

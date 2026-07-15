@@ -12,11 +12,13 @@ const CITY_LABEL: Record<string, string> = {
 interface Props {
   settings: AppSettings;
   onCreated: (job: Job) => void;
+  smartThreshold?: number;
 }
 
-export default function CreateJobForm({ settings, onCreated }: Props) {
+export default function CreateJobForm({ settings, onCreated, smartThreshold = 5 }: Props) {
   const [testMode, setTestMode] = useState(false);
   const [testLimit, setTestLimit] = useState(5);
+  const [smartMode, setSmartMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,6 +34,7 @@ export default function CreateJobForm({ settings, onCreated }: Props) {
         test_limit: testLimit,
         label_width_mm: settings.label_width_mm,
         label_height_mm: settings.label_height_mm,
+        smart_mode: smartMode,
       });
       onCreated(job);
     } catch (err: unknown) {
@@ -85,6 +88,29 @@ export default function CreateJobForm({ settings, onCreated }: Props) {
               <span className={`inline-block h-5 w-5 mt-1 transform rounded-full bg-white shadow transition-transform duration-200 ${testMode ? "translate-x-1" : "translate-x-6"}`} />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Smart mode */}
+      <div className={`rounded-xl border-2 transition-all duration-200 ${smartMode ? "border-purple-300 bg-purple-50" : "border-gray-200 bg-gray-50"}`}>
+        <div className="flex items-center justify-between px-4 py-3.5">
+          <div>
+            <p className={`text-sm font-semibold ${smartMode ? "text-purple-900" : "text-gray-600"}`}>
+              Умный режим
+            </p>
+            <p className={`text-xs mt-0.5 ${smartMode ? "text-purple-700" : "text-gray-400"}`}>
+              {smartMode
+                ? `Показать статистику, выбрать отдельные пачки (порог ≥${smartThreshold})`
+                : "Сразу генерировать общий PDF"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSmartMode(!smartMode)}
+            className={`relative inline-flex h-7 w-12 rounded-full transition-colors duration-200 focus:outline-none ${smartMode ? "bg-purple-500" : "bg-gray-300"}`}
+          >
+            <span className={`inline-block h-5 w-5 mt-1 transform rounded-full bg-white shadow transition-transform duration-200 ${smartMode ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
         </div>
       </div>
 

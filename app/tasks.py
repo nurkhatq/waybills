@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Фоновая задача обработки job: парсит Kaspi, генерит PDF, ставит в очередь на печать.
-Выполняется Celery-воркером — не зависит от веб-процесса.
+Фоновые задачи Celery.
 """
 import json
 import logging
@@ -10,29 +9,36 @@ import traceback
 
 from sqlalchemy.orm import Session
 
-from . import kaspi, pdf_service, models
+from . import kaspi, label_service, pdf_service, models
 from .celery_app import celery
 from .config import settings
 from .db import SessionLocal
+from .inventory import get_inventory
 
 logger = logging.getLogger(__name__)
 
 
-def _update_status(db: Session, job: models.Job, status: str, error: str = None):
+def _update_status(db, job, status, error=None):
     job.status = status
     if error:
         job.error = error
     db.commit()
 
 
-def _update_progress(db: Session, job: models.Job, progress: int, label: str = ""):
+def _update_progress(db, job, progress, label=""):
     job.progress = progress
     job.progress_label = label
     db.commit()
 
 
+def _waybill_cache_path(job_id, order_code):
+    return os.path.join(settings.data_dir, str(job_id), "waybills", f"{order_code}.pdf")
+
+
+# Assembly tasks
+
 @celery.task(name="tasks.fetch_assembly_job", bind=True, max_retries=0)
-def fetch_assembly_job(self, job_id: int):
+def fetch_assembly_job(self, job_id):
     db = SessionLocal()
     try:
         job = db.get(models.AssemblyJob, job_id)
@@ -42,16 +48,11 @@ def fetch_assembly_job(self, job_id: int):
         job.progress = 5
         job.progress_label = "Подключаемся к Kaspi..."
         db.commit()
-
         orders = kaspi.fetch_assembly_orders(job.city, days_back=7)
-
         job.progress = 80
         job.progress_label = f"Найдено {len(orders)} заказов..."
         db.commit()
-
-        # Delete old orders for this job (shouldn't exist, but just in case)
         db.query(models.AssemblyOrder).filter(models.AssemblyOrder.job_id == job_id).delete()
-
         for o in orders:
             db.add(models.AssemblyOrder(
                 job_id=job_id,
@@ -62,14 +63,11 @@ def fetch_assembly_job(self, job_id: int):
                 quantity=o.get("quantity", 1),
                 base_price=o.get("base_price", 0.0),
             ))
-
         job.orders_found = len(orders)
         job.status = "ready"
         job.progress = 100
         job.progress_label = ""
         db.commit()
-
-        # Cleanup: keep only last 3 assembly jobs per city (delete older ones)
         old_jobs = (
             db.query(models.AssemblyJob)
             .filter(models.AssemblyJob.city == job.city, models.AssemblyJob.id != job_id)
@@ -80,7 +78,6 @@ def fetch_assembly_job(self, job_id: int):
         for old in old_jobs:
             db.delete(old)
         db.commit()
-
     except Exception as e:
         logger.exception(f"fetch_assembly_job {job_id} failed")
         job = db.get(models.AssemblyJob, job_id)
@@ -93,7 +90,7 @@ def fetch_assembly_job(self, job_id: int):
 
 
 @celery.task(name="tasks.transmit_assembly_job", bind=True, max_retries=0)
-def transmit_assembly_job(self, job_id: int):
+def transmit_assembly_job(self, job_id):
     db = SessionLocal()
     try:
         job = db.get(models.AssemblyJob, job_id)
@@ -102,7 +99,6 @@ def transmit_assembly_job(self, job_id: int):
         job.status = "transmitting"
         job.progress = 0
         db.commit()
-
         orders = (
             db.query(models.AssemblyOrder)
             .filter(models.AssemblyOrder.job_id == job_id, models.AssemblyOrder.transmitted == False)
@@ -110,7 +106,6 @@ def transmit_assembly_job(self, job_id: int):
         )
         total = len(orders)
         done = 0
-
         for o in orders:
             ok = kaspi.assemble_order(o.kaspi_order_id, o.code)
             o.transmitted = True
@@ -119,13 +114,11 @@ def transmit_assembly_job(self, job_id: int):
             job.progress = int(done / total * 100) if total else 100
             job.progress_label = f"Отправлено {done} / {total}"
             db.commit()
-
         job.orders_transmitted = sum(1 for o in orders if o.transmitted_ok)
         job.status = "done"
         job.progress = 100
         job.progress_label = ""
         db.commit()
-
     except Exception as e:
         logger.exception(f"transmit_assembly_job {job_id} failed")
         job = db.get(models.AssemblyJob, job_id)
@@ -137,8 +130,10 @@ def transmit_assembly_job(self, job_id: int):
         db.close()
 
 
+# Waybill tasks
+
 @celery.task(name="tasks.process_job", bind=True, max_retries=0)
-def process_job(self, job_id: int):
+def process_job(self, job_id):
     db = SessionLocal()
     try:
         job = db.get(models.Job, job_id)
@@ -149,7 +144,6 @@ def process_job(self, job_id: int):
         _update_status(db, job, "parsing")
         _update_progress(db, job, 5, "Получаем заказы от Kaspi...")
 
-        # 1) Парсим Kaspi
         result = kaspi.fetch_ready_orders(job.city, job.days_back)
         orders = result["orders"]
         stats = result["stats"]
@@ -165,14 +159,9 @@ def process_job(self, job_id: int):
             _update_status(db, job, "done", "Нет заказов, готовых к передаче.")
             return
 
-        # Исключаем заказы из уже подтверждённых (напечатанных) сборок того же города
         printed_jobs = (
             db.query(models.Job)
-            .filter(
-                models.Job.city == job.city,
-                models.Job.printed_at.isnot(None),
-                models.Job.id != job.id,
-            )
+            .filter(models.Job.city == job.city, models.Job.printed_at.isnot(None), models.Job.id != job.id)
             .all()
         )
         if printed_jobs:
@@ -187,7 +176,6 @@ def process_job(self, job_id: int):
             if skipped:
                 job.orders_filtered_transmitted = (job.orders_filtered_transmitted or 0) + skipped
                 db.commit()
-                logger.info(f"Job {job.id}: исключено {skipped} уже напечатанных заказов")
 
         if not orders:
             _update_progress(db, job, 100, "")
@@ -196,83 +184,237 @@ def process_job(self, job_id: int):
 
         _update_progress(db, job, 15, f"Найдено {len(orders)} заказов, сортируем...")
 
-        # 2) Сортировка + группировка
-        freq_map = pdf_service.build_frequency_map(orders)
-        sorted_orders = pdf_service.classify_and_sort(orders, freq_map)
+        inv = get_inventory()
+        freq_map = pdf_service.build_frequency_map(orders, inventory=inv)
+        sorted_orders = pdf_service.classify_and_sort(orders, freq_map, inventory=inv)
+        orders_to_process = sorted_orders[:job.test_limit] if job.test_mode else sorted_orders
 
-        for o in sorted_orders:
+        for o in orders_to_process:
+            kd = o["attrs"].get("kaspiDelivery") or {}
             db.add(models.Order(
                 job_id=job.id,
                 order_code=o["code"],
-                waybill_number=(o["attrs"].get("kaspiDelivery") or {}).get("waybillNumber"),
+                waybill_number=kd.get("waybillNumber"),
+                waybill_url=kd.get("waybill"),
                 num_positions=o["num_positions"],
                 total_qty=o["total_qty"],
                 group_letter=o["group_letter"],
                 max_freq=o["max_freq"],
                 primary_sku=o.get("primary_sku", ""),
+                is_single=o.get("is_single", False),
                 entries_json=json.dumps(o.get("entries", []), ensure_ascii=False),
             ))
 
-        job.group_a_count = sum(1 for o in sorted_orders if o["group_letter"] == "A")
-        job.group_b_count = sum(1 for o in sorted_orders if o["group_letter"] == "B")
-        job.group_c_count = sum(1 for o in sorted_orders if o["group_letter"] == "C")
+        job.group_a_count = sum(1 for o in orders_to_process if o["group_letter"] == "A")
+        job.group_b_count = sum(1 for o in orders_to_process if o["group_letter"] == "B")
+        job.group_c_count = sum(1 for o in orders_to_process if o["group_letter"] == "C")
         db.commit()
 
-        # 3) Скачиваем накладные
-        orders_to_download = sorted_orders[:job.test_limit] if job.test_mode else sorted_orders
-        total_to_download = len(orders_to_download)
-        orders_pdfs = []
+        if job.smart_mode:
+            _run_smart_mode_fetch(db, job, orders_to_process)
+        else:
+            _run_standard_mode(db, job, orders_to_process)
 
-        for i, o in enumerate(orders_to_download):
-            # Прогресс 20% → 80% по мере скачивания
-            pct = 20 + int((i / total_to_download) * 60)
-            _update_progress(db, job, pct, f"Скачиваем накладные {i + 1} / {total_to_download}")
+    except Exception as e:
+        logger.exception(f"Job {job_id} failed")
+        job = db.get(models.Job, job_id)
+        if job:
+            _update_status(db, job, "error", f"{type(e).__name__}: {e}\n{traceback.format_exc()[:2000]}")
+    finally:
+        db.close()
 
-            kd = o["attrs"].get("kaspiDelivery") or {}
-            url = kd.get("waybill")
-            if not url:
-                continue
-            try:
-                pdf_bytes = kaspi.download_waybill_pdf(url)
-                orders_pdfs.append((o["code"], pdf_bytes))
-            except Exception as e:
-                logger.warning(f"Order {o['code']}: waybill download failed: {e}")
 
-        # 4) Генерим PDF
-        _update_progress(db, job, 85, "Собираем PDF...")
-        data_dir = os.path.join(settings.data_dir, str(job.id))
-        os.makedirs(data_dir, exist_ok=True)
+def _run_smart_mode_fetch(db, job, orders):
+    total = len(orders)
+    codes_with_pdf = set()
 
-        total_count = len(orders_pdfs)
-        print_pdfs = orders_pdfs
-        print_count = len(print_pdfs)
+    for i, o in enumerate(orders):
+        pct = 20 + int((i / total) * 55)
+        _update_progress(db, job, pct, f"Скачиваем накладные {i + 1} / {total}")
+        kd = o["attrs"].get("kaspiDelivery") or {}
+        url = kd.get("waybill")
+        if not url:
+            continue
+        try:
+            pdf_bytes = kaspi.download_waybill_pdf(url)
+            cache_path = _waybill_cache_path(job.id, o["code"])
+            pdf_service.save_pdf(pdf_bytes, cache_path)
+            codes_with_pdf.add(o["code"])
+        except Exception as e:
+            logger.warning(f"Order {o['code']}: waybill download failed: {e}")
 
+    _update_progress(db, job, 80, "Анализируем заказы...")
+
+    inv = get_inventory()
+    single_groups = {}
+    non_single_count = 0
+
+    for o in orders:
+        if o["code"] not in codes_with_pdf:
+            continue
+        if o.get("is_single"):
+            sku = o.get("primary_sku", o["code"])
+            name = inv.name(sku) if len(inv) > 0 else sku
+            if sku not in single_groups:
+                single_groups[sku] = {"sku": sku, "name": name, "count": 0, "codes": []}
+            single_groups[sku]["count"] += 1
+            single_groups[sku]["codes"].append(o["code"])
+        else:
+            non_single_count += 1
+
+    groups_list = sorted(single_groups.values(), key=lambda g: -g["count"])
+    stats = {
+        "groups": groups_list,
+        "non_single_count": non_single_count,
+        "total_with_pdf": len(codes_with_pdf),
+    }
+    job.single_stats_json = json.dumps(stats, ensure_ascii=False)
+    _update_progress(db, job, 100, "")
+    _update_status(db, job, "stats_ready")
+
+
+def _run_standard_mode(db, job, orders):
+    total = len(orders)
+    orders_pdfs = []
+
+    for i, o in enumerate(orders):
+        pct = 20 + int((i / total) * 60)
+        _update_progress(db, job, pct, f"Скачиваем накладные {i + 1} / {total}")
+        kd = o["attrs"].get("kaspiDelivery") or {}
+        url = kd.get("waybill")
+        if not url:
+            continue
+        try:
+            pdf_bytes = kaspi.download_waybill_pdf(url)
+            orders_pdfs.append((o["code"], pdf_bytes))
+        except Exception as e:
+            logger.warning(f"Order {o['code']}: waybill download failed: {e}")
+
+    _update_progress(db, job, 85, "Собираем PDF...")
+    _finalize_pdfs(db, job, [("waybills", orders_pdfs)])
+
+
+def _finalize_pdfs(db, job, batches):
+    data_dir = os.path.join(settings.data_dir, str(job.id))
+    os.makedirs(data_dir, exist_ok=True)
+    filenames = []
+    total_count = 0
+
+    for prefix, orders_pdfs in batches:
+        if not orders_pdfs:
+            continue
         pdf_bytes = pdf_service.build_pdf_for_orders(
-            print_pdfs,
+            orders_pdfs,
             label_width_mm=job.label_width_mm,
             label_height_mm=job.label_height_mm,
         )
-        suffix = f"_TEST_{print_count}pcs" if job.test_mode else f"_{total_count}pcs"
-        filename = f"waybills{suffix}.pdf"
+        real_count = sum(1 for code, _ in orders_pdfs if not code.startswith("__internal_"))
+        filename = f"{prefix}_{real_count}pcs.pdf"
         path = os.path.join(data_dir, filename)
         pdf_service.save_pdf(pdf_bytes, path)
-
         db.add(models.PrintTask(
             job_id=job.id,
             city=job.city,
             pdf_filename=filename,
             pdf_size_bytes=len(pdf_bytes),
-            waybills_count=print_count,
+            waybills_count=real_count,
             roll_type="A",
             status="queued",
         ))
+        filenames.append(filename)
+        total_count += real_count
 
-        job.pdf_files_json = json.dumps([filename])
-        job.orders_printed = print_count
-        _update_progress(db, job, 100, "")
-        _update_status(db, job, "pdf_ready")
+    job.pdf_files_json = json.dumps(filenames)
+    job.orders_printed = total_count
+    _update_progress(db, job, 100, "")
+    _update_status(db, job, "pdf_ready")
+
+
+# Smart-mode: генерация PDF после выбора пользователя
+
+@celery.task(name="tasks.generate_pdf_job", bind=True, max_retries=0)
+def generate_pdf_job(self, job_id):
+    db = SessionLocal()
+    try:
+        job = db.get(models.Job, job_id)
+        if not job:
+            return
+
+        _update_status(db, job, "generating")
+        _update_progress(db, job, 5, "Формируем PDF...")
+
+        selected = json.loads(job.selected_batches_json or "[]")
+        selected_codes_set = {code for batch in selected for code in batch.get("codes", [])}
+
+        db_orders = (
+            db.query(models.Order)
+            .filter(models.Order.job_id == job_id)
+            .all()
+        )
+        code_to_order = {o.order_code: o for o in db_orders}
+        batches = []
+
+        for i, batch in enumerate(selected):
+            batch_pdfs = []
+            product_name = batch.get("name", batch["sku"])
+            codes = batch.get("codes", [])
+
+            try:
+                internal_bytes = label_service.build_internal_label(
+                    product_name=product_name,
+                    order_codes=codes,
+                    label_width_mm=job.label_width_mm,
+                    label_height_mm=job.label_height_mm,
+                )
+                batch_pdfs.append((f"__internal_{i}", internal_bytes))
+            except Exception as e:
+                logger.error(f"Internal label for batch {i} failed: {e}")
+
+            for code in codes:
+                cache_path = _waybill_cache_path(job_id, code)
+                if os.path.exists(cache_path):
+                    with open(cache_path, "rb") as f:
+                        batch_pdfs.append((code, f.read()))
+                else:
+                    order = code_to_order.get(code)
+                    if order and order.waybill_url:
+                        try:
+                            pdf_bytes = kaspi.download_waybill_pdf(order.waybill_url)
+                            batch_pdfs.append((code, pdf_bytes))
+                        except Exception as e:
+                            logger.warning(f"Re-download failed for {code}: {e}")
+
+            if batch_pdfs:
+                safe_sku = batch["sku"].replace("/", "_")[:30]
+                batches.append((f"batch_{i + 1}_{safe_sku}", batch_pdfs))
+
+            pct = 5 + int((i + 1) / max(len(selected), 1) * 60)
+            _update_progress(db, job, pct, f"Пачка {i + 1} / {len(selected)}")
+
+        _update_progress(db, job, 70, "Формируем общую пачку...")
+        common_pdfs = []
+        for order in db_orders:
+            if order.order_code in selected_codes_set:
+                continue
+            cache_path = _waybill_cache_path(job_id, order.order_code)
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as f:
+                    common_pdfs.append((order.order_code, f.read()))
+            elif order.waybill_url:
+                try:
+                    pdf_bytes = kaspi.download_waybill_pdf(order.waybill_url)
+                    common_pdfs.append((order.order_code, pdf_bytes))
+                except Exception as e:
+                    logger.warning(f"Re-download failed for {order.order_code}: {e}")
+
+        if common_pdfs:
+            batches.append(("common", common_pdfs))
+
+        _update_progress(db, job, 85, "Сохраняем PDF...")
+        _finalize_pdfs(db, job, batches)
+
     except Exception as e:
-        logger.exception(f"Job {job_id} failed")
+        logger.exception(f"generate_pdf_job {job_id} failed")
         job = db.get(models.Job, job_id)
         if job:
             _update_status(db, job, "error", f"{type(e).__name__}: {e}\n{traceback.format_exc()[:2000]}")

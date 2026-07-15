@@ -33,6 +33,11 @@ def init_db():
             "ALTER TABLE jobs ADD COLUMN orders_printed INTEGER",
             "ALTER TABLE orders ADD COLUMN primary_sku TEXT",
             "ALTER TABLE orders ADD COLUMN entries_json TEXT",
+            "ALTER TABLE orders ADD COLUMN is_single INTEGER DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN waybill_url TEXT",
+            "ALTER TABLE jobs ADD COLUMN smart_mode INTEGER DEFAULT 0",
+            "ALTER TABLE jobs ADD COLUMN single_stats_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN selected_batches_json TEXT",
         ]:
             try:
                 conn.execute(text(stmt))

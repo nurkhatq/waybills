@@ -88,6 +88,20 @@ export interface JobOrder {
   entries: OrderEntry[];
 }
 
+export interface SingleGroup {
+  sku: string;
+  name: string;
+  count: number;
+  codes: string[];
+}
+
+export interface SingleStats {
+  groups: SingleGroup[];
+  non_single_count: number;
+  total_with_pdf: number;
+  threshold?: number;
+}
+
 export interface Job {
   id: number;
   city: string;
@@ -107,6 +121,8 @@ export interface Job {
   printed_at: string | null;
   test_mode: boolean;
   test_limit: number;
+  smart_mode: boolean;
+  single_stats: SingleStats | null;
   days_back: number;
   label_width_mm: number;
   label_height_mm: number;
@@ -124,6 +140,7 @@ export interface Config {
     label_height_mm: number;
     test_limit: number;
   };
+  smart_batch_threshold: number;
 }
 
 export const api = {
@@ -146,7 +163,13 @@ export const api = {
     test_limit: number;
     label_width_mm: number;
     label_height_mm: number;
+    smart_mode?: boolean;
   }) => req<Job>("/jobs", { method: "POST", body: JSON.stringify(payload) }),
+
+  getJobStats: (id: number) => req<SingleStats>(`/jobs/${id}/stats`),
+
+  generateJob: (id: number, selectedBatches: { sku: string; name: string; codes: string[] }[]) =>
+    req<Job>(`/jobs/${id}/generate`, { method: "POST", body: JSON.stringify({ selected_batches: selectedBatches }) }),
 
   retryJob: (id: number) => req<Job>(`/jobs/${id}/retry`, { method: "POST" }),
 
