@@ -115,7 +115,7 @@ export interface Job {
   group_a_count: number;
   group_b_count: number;
   group_c_count: number;
-  pdf_files: { filename: string; label: string; count: number | null }[];
+  pdf_files: { filename: string; label: string; count: number | null; printed: boolean }[];
   progress: number;
   progress_label: string;
   printed_at: string | null;
@@ -179,6 +179,9 @@ export const api = {
 
   markPrinted: (id: number) => req<Job>(`/jobs/${id}/mark-printed`, { method: "POST" }),
   unmarkPrinted: (id: number) => req<Job>(`/jobs/${id}/unmark-printed`, { method: "POST" }),
+  markFilePrinted: (id: number, filename: string, printed: boolean) =>
+    req<Job>(`/jobs/${id}/mark-file-printed`, { method: "POST", body: JSON.stringify({ filename, printed }) }),
+  deleteJob: (id: number) => req<{ deleted: number }>(`/jobs/${id}`, { method: "DELETE" }),
 
   startAssemblyFetch: (city: string) =>
     req<AssemblyJob>(`/assembly/fetch?city=${city}`, { method: "POST" }),

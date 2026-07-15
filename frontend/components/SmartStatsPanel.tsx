@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api, Job, SingleGroup } from "@/lib/api";
 
 interface Props {
@@ -14,15 +14,17 @@ export default function SmartStatsPanel({ job, threshold, onGenerated }: Props) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Инициализация: авто-выбор по порогу
+  // Инициализация только один раз при появлении stats — дальнейшие re-render (poll каждые 4с) не сбрасывают выбор
+  const initializedJobRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!stats) return;
+    if (!stats || initializedJobRef.current === job.id) return;
+    initializedJobRef.current = job.id;
     const init: Record<string, boolean> = {};
     for (const g of stats.groups) {
       init[g.sku] = g.count >= threshold;
     }
     setSelected(init);
-  }, [stats, threshold]);
+  }, [stats, job.id, threshold]);
 
   if (!stats) return null;
 

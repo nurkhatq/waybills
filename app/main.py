@@ -68,14 +68,22 @@ class GenerateJobPayload(BaseModel):
     selected_batches: list  # [{sku, name, codes: [...]}, ...]
 
 
-def _parse_pdf_files(raw_json: str | None) -> list:
+class MarkFilePrintedPayload(BaseModel):
+    filename: str
+    printed: bool
+
+
+def _parse_pdf_files(raw_json: str | None, printed_files: list | None = None) -> list:
     if not raw_json:
         return []
     data = json.loads(raw_json)
     if not data:
         return []
+    printed_set = set(printed_files or [])
     if isinstance(data[0], str):
-        return [{"filename": f, "label": f, "count": None} for f in data]
+        return [{"filename": f, "label": f, "count": None, "printed": f in printed_set} for f in data]
+    for item in data:
+        item["printed"] = item["filename"] in printed_set
     return data
 
 
@@ -92,7 +100,10 @@ def job_to_dict(job: models.Job) -> dict:
         "group_a_count": job.group_a_count,
         "group_b_count": job.group_b_count,
         "group_c_count": job.group_c_count,
-        "pdf_files": _parse_pdf_files(job.pdf_files_json),
+        "pdf_files": _parse_pdf_files(
+            job.pdf_files_json,
+            json.loads(job.printed_files_json) if job.printed_files_json else None,
+        ),
         "orders_printed": job.orders_printed,
         "progress": job.progress or 0,
         "progress_label": job.progress_label or "",
@@ -260,6 +271,59 @@ def unmark_printed(
     job.printed_at = None
     db.commit()
     return job_to_dict(job)
+
+
+@app.post("/jobs/{job_id}/mark-file-printed")
+def mark_file_printed(
+    job_id: int,
+    payload: MarkFilePrintedPayload,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+        raise HTTPException(403, "Нет доступа")
+
+    printed_files = json.loads(job.printed_files_json or "[]")
+    if payload.printed and payload.filename not in printed_files:
+        printed_files.append(payload.filename)
+    elif not payload.printed and payload.filename in printed_files:
+        printed_files.remove(payload.filename)
+    job.printed_files_json = json.dumps(printed_files)
+
+    # Авто-устанавливаем printed_at когда все файлы отмечены
+    pdf_files = json.loads(job.pdf_files_json or "[]")
+    all_filenames = [f["filename"] if isinstance(f, dict) else f for f in pdf_files]
+    if all_filenames and all(fn in printed_files for fn in all_filenames):
+        if not job.printed_at:
+            job.printed_at = datetime.datetime.utcnow()
+    else:
+        job.printed_at = None
+
+    db.commit()
+    return job_to_dict(job)
+
+
+@app.delete("/jobs/{job_id}")
+def delete_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(403, "Только администратор может удалять сборки")
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    import shutil
+    data_dir = os.path.join(settings.data_dir, str(job_id))
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir, ignore_errors=True)
+    db.delete(job)
+    db.commit()
+    return {"deleted": job_id}
 
 
 @app.post("/jobs/{job_id}/retry")

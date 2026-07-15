@@ -3,6 +3,7 @@ export interface AppSettings {
   days_back: number;
   label_width_mm: number;
   label_height_mm: number;
+  smart_batch_threshold: number;
 }
 
 const KEY = "wb_settings";
@@ -27,5 +28,5 @@ export function saveSettings(s: AppSettings): void {
 }
 
 function defaults(city: string): AppSettings {
-  return { city, days_back: 7, label_width_mm: 75, label_height_mm: 120 };
+  return { city, days_back: 7, label_width_mm: 75, label_height_mm: 120, smart_batch_threshold: 5 };
 }

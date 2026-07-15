@@ -25,28 +25,35 @@ interface Props {
   onRetry: (job: Job) => void;
   retrying: boolean;
   onMarkPrinted: (job: Job) => void;
+  onDelete: (jobId: number) => void;
+  role?: string;
   smartThreshold?: number;
 }
 
-export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartThreshold = 5 }: Props) {
+export default function JobCard({ job, onRetry, retrying, onMarkPrinted, onDelete, role, smartThreshold = 5 }: Props) {
   const router = useRouter();
   const [printingFile, setPrintingFile] = useState<string | null>(null);
-  const [marking, setMarking] = useState(false);
+  const [togglingFile, setTogglingFile] = useState<string | null>(null);
 
-  async function handleMarkPrinted() {
-    if (!confirm("Подтвердите: накладные распечатаны?\n\nЭти заказы не войдут в следующую сборку.")) return;
-    setMarking(true);
-    try { onMarkPrinted(await api.markPrinted(job.id)); }
+  const isAdmin = role === "admin" || role === "manager";
+
+  async function handleToggleFilePrinted(filename: string, currentlyPrinted: boolean) {
+    setTogglingFile(filename);
+    try { onMarkPrinted(await api.markFilePrinted(job.id, filename, !currentlyPrinted)); }
     catch (err) { alert(err instanceof Error ? err.message : "Ошибка"); }
-    finally { setMarking(false); }
+    finally { setTogglingFile(null); }
   }
 
-  async function handleUnmarkPrinted() {
-    if (!confirm("Отменить отметку «Напечатано»?\n\nЭти заказы снова войдут в следующую сборку.")) return;
-    setMarking(true);
-    try { onMarkPrinted(await api.unmarkPrinted(job.id)); }
-    catch (err) { alert(err instanceof Error ? err.message : "Ошибка"); }
-    finally { setMarking(false); }
+  async function handleUnmarkAll() {
+    if (!confirm("Отменить отметку «Напечатано» для всех пачек?\n\nЭти заказы снова войдут в следующую сборку.")) return;
+    try {
+      // Снимаем отметку с каждого напечатанного файла
+      let updated = job;
+      for (const f of job.pdf_files.filter(f => f.printed)) {
+        updated = await api.markFilePrinted(job.id, f.filename, false);
+      }
+      onMarkPrinted(updated);
+    } catch (err) { alert(err instanceof Error ? err.message : "Ошибка"); }
   }
 
   async function handlePrint(filename: string) {
@@ -57,17 +64,15 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartTh
   }
 
   const st = STATUS[job.status] ?? { label: job.status, color: "text-gray-600 bg-gray-100", border: "border-l-gray-300" };
-  const isRunning      = ["pending", "parsing", "generating"].includes(job.status);
-  const isStatsReady   = job.status === "stats_ready";
-  const canRetry       = ["done", "error", "pdf_ready"].includes(job.status);
-  const canMarkPrinted = ["pdf_ready", "done"].includes(job.status) && !job.printed_at;
-  const isPrinted      = !!job.printed_at;
-  const pct            = job.progress ?? 0;
+  const isRunning    = ["pending", "parsing", "generating"].includes(job.status);
+  const isStatsReady = job.status === "stats_ready";
+  const canRetry     = ["done", "error", "pdf_ready"].includes(job.status);
+  const isPrinted    = !!job.printed_at;
+  const hasPdfs      = job.pdf_files.length > 0;
+  const pct          = job.progress ?? 0;
 
-  // Показываем фактически напечатанных (после дедупликации), иначе найденных
   const displayCount = job.orders_printed ?? (job.orders_found > 0 ? job.orders_found : null);
-
-  const borderClass = isPrinted ? "border-l-green-600" : st.border;
+  const borderClass  = isPrinted ? "border-l-green-600" : st.border;
 
   const date = new Date(job.created_at + "Z").toLocaleString("ru-RU", {
     day: "2-digit", month: "2-digit", year: "2-digit",
@@ -111,82 +116,98 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartTh
           <div className="flex-1 min-w-0">
 
             {/* Header row */}
-            <button
-              onClick={() => router.push(`/jobs/${job.id}`)}
-              className="flex items-center justify-between gap-2 flex-wrap w-full text-left hover:opacity-80 transition-opacity"
-            >
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-mono text-gray-400">#{job.id}</span>
-                <span className="font-semibold text-gray-900 text-sm">{CITY_LABEL[job.city] ?? job.city}</span>
-                {job.test_mode && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 uppercase tracking-wide">
-                    Test ×{job.test_limit}
-                  </span>
-                )}
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <time className="text-xs text-gray-400 tabular-nums">{date}</time>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"><polyline points="9,18 15,12 9,6"/></svg>
-              </div>
-            </button>
-
-            {/* Actions */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-
-              {/* PDF files */}
-              {job.pdf_files.length > 0 && (
-                <div className="flex flex-col gap-2 w-full">
-                  {job.pdf_files.map((f) => (
-                    <div key={f.filename} className="flex items-center rounded-xl border-2 border-gray-200 overflow-hidden">
-                      <button
-                        onClick={() => handlePrint(f.filename)}
-                        disabled={!!printingFile}
-                        className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-1 min-w-0"
-                      >
-                        {printingFile === f.filename
-                          ? <svg className="animate-spin shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
-                          : <svg className="shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                        }
-                        <span className="flex-1 min-w-0 text-left">
-                          {printingFile === f.filename ? "Загрузка..." : (
-                            <>
-                              <span className="truncate block">{f.label}</span>
-                              {f.count != null && <span className="font-normal opacity-70">{f.count} накл.</span>}
-                            </>
-                          )}
-                        </span>
-                      </button>
-                      <a href={api.pdfUrl(job.id, f.filename)} target="_blank" rel="noreferrer" title="Открыть PDF"
-                         className="shrink-0 px-3 py-2 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                      </a>
-                    </div>
-                  ))}
+            <div className="flex items-start justify-between gap-2">
+              <button
+                onClick={() => router.push(`/jobs/${job.id}`)}
+                className="flex-1 min-w-0 flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-mono text-gray-400">#{job.id}</span>
+                  <span className="font-semibold text-gray-900 text-sm">{CITY_LABEL[job.city] ?? job.city}</span>
+                  {job.test_mode && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 uppercase tracking-wide">
+                      Test ×{job.test_limit}
+                    </span>
+                  )}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span>
                 </div>
-              )}
+                <time className="text-xs text-gray-400 tabular-nums">{date}</time>
+              </button>
 
-              {/* Retry */}
+              {/* Delete button (admin only) */}
+              {isAdmin && !isRunning && (
+                <button
+                  onClick={() => onDelete(job.id)}
+                  title="Удалить сборку"
+                  className="shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
+              )}
+            </div>
+
+            {/* PDF files */}
+            {hasPdfs && (
+              <div className="mt-3 flex flex-col gap-1.5 w-full">
+                {job.pdf_files.map((f) => (
+                  <div key={f.filename} className={`flex items-stretch rounded-xl border-2 overflow-hidden transition-colors ${f.printed ? "border-green-300" : "border-gray-200"}`}>
+                    {/* Print button */}
+                    <button
+                      onClick={() => handlePrint(f.filename)}
+                      disabled={!!printingFile}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-1 min-w-0"
+                    >
+                      {printingFile === f.filename
+                        ? <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+                        : <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6,9 6,2 18,2 18,9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                      }
+                      <span className="flex-1 min-w-0 text-left">
+                        {printingFile === f.filename ? "Загрузка..." : (
+                          <span className="flex items-baseline gap-1.5">
+                            <span className="truncate">{f.label}</span>
+                            {f.count != null && <span className="opacity-60 font-normal shrink-0">{f.count} накл.</span>}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+
+                    {/* Open PDF */}
+                    <a href={api.pdfUrl(job.id, f.filename)} target="_blank" rel="noreferrer" title="Открыть PDF"
+                       className="shrink-0 flex items-center px-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-50 border-l-2 border-gray-200 transition-colors">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    </a>
+
+                    {/* Printed checkbox */}
+                    <button
+                      onClick={() => handleToggleFilePrinted(f.filename, f.printed)}
+                      disabled={togglingFile === f.filename}
+                      title={f.printed ? "Снять отметку" : "Отметить напечатанным"}
+                      className={`shrink-0 flex items-center px-2.5 border-l-2 transition-colors ${
+                        f.printed
+                          ? "border-green-300 bg-green-50 text-green-600 hover:bg-green-100"
+                          : "border-gray-200 text-gray-300 hover:text-gray-500 hover:bg-gray-50"
+                      }`}
+                    >
+                      {togglingFile === f.filename
+                        ? <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
+                        : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+                      }
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Actions row */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
               {canRetry && (
                 <button onClick={() => onRetry(job)} disabled={retrying}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border-2 border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border-2 border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   {retrying
                     ? <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
                     : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                   }
                   Повторить
-                </button>
-              )}
-
-              {/* Mark printed */}
-              {canMarkPrinted && (
-                <button onClick={handleMarkPrinted} disabled={marking}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border-2 border-gray-300 text-gray-700 hover:border-gray-900 hover:text-gray-900 active:scale-95 disabled:opacity-40 transition-all">
-                  {marking
-                    ? <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M2 12h4"/></svg>
-                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
-                  }
-                  Напечатано
                 </button>
               )}
             </div>
@@ -218,14 +239,13 @@ export default function JobCard({ job, onRetry, retrying, onMarkPrinted, smartTh
         <div className="flex items-center justify-between px-5 py-2.5 bg-green-700 border-t-2 border-green-700">
           <div className="flex items-center gap-2 text-white text-xs font-semibold">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20,6 9,17 4,12"/></svg>
-            Накладные напечатаны
+            Все накладные напечатаны
           </div>
           <button
-            onClick={handleUnmarkPrinted}
-            disabled={marking}
-            className="text-green-200 hover:text-white text-xs underline underline-offset-2 disabled:opacity-50 transition-colors"
+            onClick={handleUnmarkAll}
+            className="text-green-200 hover:text-white text-xs underline underline-offset-2 transition-colors"
           >
-            {marking ? "..." : "отменить"}
+            отменить
           </button>
         </div>
       )}

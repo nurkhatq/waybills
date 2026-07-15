@@ -105,6 +105,23 @@ export default function SettingsPanel({ open, onClose, settings, onChange, confi
             </Row>
           </div>
 
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-6 mb-1">Умный режим</p>
+          <div className="bg-gray-50 rounded-xl border border-gray-200 px-4">
+            <Row label="Мин. товаров для пачки">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={settings.smart_batch_threshold}
+                  onChange={(e) => update({ smart_batch_threshold: Math.min(100, Math.max(1, Number(e.target.value))) })}
+                  className="w-16 text-center text-sm font-medium px-2 py-1.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400 transition-all"
+                />
+                <span className="text-xs text-gray-400">шт.</span>
+              </div>
+            </Row>
+          </div>
+
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-6 mb-1">Этикетка</p>
           <div className="bg-gray-50 rounded-xl border border-gray-200 px-4">
             <Row label="Ширина, мм">

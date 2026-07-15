@@ -92,6 +92,16 @@ export default function Dashboard() {
     setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
   }
 
+  async function handleDeleteJob(jobId: number) {
+    if (!confirm("Удалить эту сборку?")) return;
+    try {
+      await api.deleteJob(jobId);
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Ошибка удаления");
+    }
+  }
+
   async function handleRetry(job: Job) {
     setRetryingId(job.id);
     try {
@@ -129,7 +139,8 @@ export default function Dashboard() {
     return new Date(j.created_at + "Z").toLocaleDateString("ru-RU") === todayStr;
   });
 
-  const smartThreshold = config?.smart_batch_threshold ?? 5;
+  const smartThreshold = settings.smart_batch_threshold ?? config?.smart_batch_threshold ?? 5;
+  const role = config?.role ?? "operator";
 
   if (!user || !settings) return null;
 
@@ -221,7 +232,7 @@ export default function Dashboard() {
               <div className="space-y-3">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">Сегодня</p>
                 {todayJobs.map((j) => (
-                  <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
+                  <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} role={role} onDelete={handleDeleteJob} />
                 ))}
               </div>
             )}
@@ -251,7 +262,7 @@ export default function Dashboard() {
             )}
 
             {activeJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} role={role} onDelete={handleDeleteJob} />
             ))}
 
             {firstLoad && <><SkeletonCard /><SkeletonCard /></>}
@@ -269,7 +280,7 @@ export default function Dashboard() {
             )}
 
             {doneJobs.map((j) => (
-              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} />
+              <JobCard key={j.id} job={j} onRetry={handleRetry} retrying={retryingId === j.id} onMarkPrinted={handleMarkPrinted} smartThreshold={smartThreshold} role={role} onDelete={handleDeleteJob} />
             ))}
           </div>
         )}

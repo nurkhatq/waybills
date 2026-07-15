@@ -57,6 +57,9 @@ class Job(Base):
     single_stats_json = Column(Text, nullable=True)    # {groups:[{sku,name,count,codes}], non_single_count:N}
     selected_batches_json = Column(Text, nullable=True)  # [{sku,name,codes:[..]}] — выбор пользователя
 
+    # Отслеживание печати по каждому PDF-файлу
+    printed_files_json = Column(Text, nullable=True)  # JSON-массив имён файлов, отмеченных напечатанными
+
     created_at = Column(DateTime, default=now, index=True)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

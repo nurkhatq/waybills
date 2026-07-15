@@ -38,6 +38,7 @@ def init_db():
             "ALTER TABLE jobs ADD COLUMN smart_mode INTEGER DEFAULT 0",
             "ALTER TABLE jobs ADD COLUMN single_stats_json TEXT",
             "ALTER TABLE jobs ADD COLUMN selected_batches_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN printed_files_json TEXT",
         ]:
             try:
                 conn.execute(text(stmt))
