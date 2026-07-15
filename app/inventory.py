@@ -74,10 +74,18 @@ def get_inventory() -> Inventory:
     global _inventory
     if _inventory is None:
         _inventory = Inventory()
+        # Ленивая загрузка при первом обращении из любого процесса (воркер, API)
+        try:
+            from .config import settings
+            _inventory.load(settings.inventory_csv_path)
+        except Exception as e:
+            logger.warning(f"Auto-load inventory failed: {e}")
     return _inventory
 
 
 def load_inventory(csv_path: str):
-    inv = get_inventory()
-    inv.load(csv_path)
-    return inv
+    global _inventory
+    if _inventory is None:
+        _inventory = Inventory()
+    _inventory.load(csv_path)
+    return _inventory
