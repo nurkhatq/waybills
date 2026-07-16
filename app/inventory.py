@@ -32,7 +32,12 @@ class Inventory:
                         continue
                     name = row.get("ms_name", "") or row.get("kaspi_title", "") or main
                     is_kit = (row.get("ms_type", "") or "").strip() == "Комплект"
-                    self._sku_to_main[main] = main
+                    is_dop = (row.get("is_dop_of", "") or "").strip() == "да"
+                    # дубли (is_dop_of=да) не самомаппируем — иначе перезапишут
+                    # маппинг dop→parent, выставленный при обработке родительской строки
+                    if not is_dop:
+                        self._sku_to_main[main] = main
+                    # тип товара сохраняем всегда (нужен для is_kit_for_offer)
                     self._main_info[main] = (name, is_kit)
 
                     dop_raw = row.get("dop_skus", "")
