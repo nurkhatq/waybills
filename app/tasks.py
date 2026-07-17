@@ -311,7 +311,7 @@ def _finalize_pdfs(db, job, batches, labels: dict = None):
         if not orders_pdfs:
             continue
         pdf_bytes = pdf_service.build_pdf_for_orders(
-            orders_pdfs,
+            list(reversed(orders_pdfs)),
             label_width_mm=job.label_width_mm,
             label_height_mm=job.label_height_mm,
         )

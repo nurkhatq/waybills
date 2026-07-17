@@ -27,12 +27,13 @@ class Inventory:
             with open(csv_path, encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    main = row.get("main_sku", "").strip()
+                    main = row.get("main_sku", "").strip().strip(",")
                     if not main:
                         continue
                     name = row.get("ms_name", "") or row.get("kaspi_title", "") or main
-                    is_kit = (row.get("ms_type", "") or "").strip() == "Комплект"
                     is_dop = (row.get("is_dop_of", "") or "").strip() == "да"
+                    # дубли — всегда non-kit: они дубли Товара и собираются как тот же Товар
+                    is_kit = False if is_dop else (row.get("ms_type", "") or "").strip() == "Комплект"
                     # дубли (is_dop_of=да) не самомаппируем — иначе перезапишут
                     # маппинг dop→parent, выставленный при обработке родительской строки
                     if not is_dop:

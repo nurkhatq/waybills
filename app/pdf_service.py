@@ -27,12 +27,17 @@ def _resolve_sku(offer_code: str, inventory=None) -> str:
 
 
 def build_frequency_map(orders: List[Dict], inventory=None) -> "collections.Counter":
+    # Считаем кол-во заказов (не штук) — иначе qty=2 в одном заказе B
+    # искусственно поднимает приоритет и перемешивает одиночные пачки
     freq = collections.Counter()
     for o in orders:
+        seen = set()
         for e in o["entries"]:
             offer_code = (e.get("offer") or {}).get("code", "")
             master = _resolve_sku(offer_code, inventory)
-            freq[master] += e.get("quantity") or 0
+            if master not in seen:
+                freq[master] += 1
+                seen.add(master)
     return freq
 
 
@@ -77,6 +82,7 @@ def classify_and_sort(orders: List[Dict], freq_map: "collections.Counter", inven
     orders.sort(
         key=lambda o: (
             {"A": 0, "B": 1, "C": 2}[o["group_letter"]],
+            0 if o["is_single"] else 1,   # одиночные внутри группы идут перед комплектами
             -o["max_freq"],
             o["primary_sku"],
             -o["total_qty"],
