@@ -78,6 +78,8 @@ def fetch_ready_orders(city: str, days_back: int = 7, progress_cb=None) -> Dict:
             if item.get("type") == "orderentries"
         }
 
+        today_kz = datetime.datetime.now(tz=TZ_KZ).date()
+
         for o in orders:
             a = o.get("attributes", {})
             if a.get("pickupPointId") != pickup_point_id:
@@ -93,6 +95,12 @@ def fetch_ready_orders(city: str, days_back: int = 7, progress_cb=None) -> Dict:
             if kd.get("express"):
                 stats["filtered_express"] += 1
                 continue
+            plan_ts = kd.get("courierTransmissionPlanningDate")
+            if plan_ts is not None:
+                plan_date = datetime.datetime.fromtimestamp(plan_ts / 1000, tz=TZ_KZ).date()
+                if plan_date != today_kz:
+                    stats["filtered_transmitted"] += 1
+                    continue
 
             entry_ids = [
                 e["id"]
