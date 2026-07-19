@@ -173,6 +173,8 @@ def fetch_assembly_orders(city: str, days_back: int = 7) -> list:
             if item.get("type") == "orderentries"
         }
 
+        today_kz = datetime.datetime.now(tz=TZ_KZ).date()
+
         for o in orders:
             a = o.get("attributes", {})
             if a.get("pickupPointId") != pickup_point_id:
@@ -185,12 +187,22 @@ def fetch_assembly_orders(city: str, days_back: int = 7) -> list:
             if kd.get("express"):  # skip express
                 continue
 
+            # Только заказы с плановой передачей курьеру СЕГОДНЯ
+            plan_ts = kd.get("courierTransmissionPlanningDate")
+            if plan_ts is not None:
+                plan_date = datetime.datetime.fromtimestamp(plan_ts / 1000, tz=TZ_KZ).date()
+                if plan_date != today_kz:
+                    continue
+
             entry_ids = [
                 e["id"]
                 for e in o.get("relationships", {}).get("entries", {}).get("data", [])
             ]
             entries = [entry_lookup.get(eid, {}) for eid in entry_ids if entry_lookup.get(eid)]
-            if len(entries) != 1:  # only single-position orders
+            # Только 1 позиция × 1 штука (наборы включены, мульти-qty и мульти-позиции — нет)
+            if len(entries) != 1:
+                continue
+            if entries[0].get("quantity", 1) != 1:
                 continue
 
             e = entries[0]
