@@ -17,6 +17,7 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const torchOnRef = useRef(false);
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -64,8 +65,10 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
             if (stopped || !result) return;
             const now = Date.now();
             if (now < pausedUntil.current || !activeRef.current) return;
-            pausedUntil.current = now + pauseMs;
             const text = (result as { getText: () => string }).getText();
+            // Игнорируем QR-коды (обычно ссылки или длинный текст)
+            if (text.includes("://") || text.startsWith("http")) return;
+            pausedUntil.current = now + pauseMs;
             onScanRef.current(text);
           }
         );
@@ -79,7 +82,17 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
             const caps = track.getCapabilities() as Record<string, unknown>;
             if (caps.torch) setTorchSupported(true);
             const zoomCap = caps.zoom as { min: number; max: number; step: number } | undefined;
-            if (zoomCap) setZoomRange({ min: zoomCap.min, max: Math.min(zoomCap.max, 4) });
+            if (zoomCap) {
+              setZoomRange({ min: zoomCap.min, max: Math.min(zoomCap.max, 4) });
+              // Default to 2× zoom if supported
+              const defaultZoom = Math.min(2, Math.min(zoomCap.max, 4));
+              if (defaultZoom > zoomCap.min) {
+                try {
+                  await track.applyConstraints({ advanced: [{ zoom: defaultZoom } as MediaTrackConstraintSet] });
+                  setZoom(defaultZoom);
+                } catch {}
+              }
+            }
           }
         }
 
@@ -99,6 +112,11 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
     return () => {
       stopped = true;
+      // Выключаем фонарик при размонтировании
+      if (torchOnRef.current && trackRef.current) {
+        try { trackRef.current.applyConstraints({ advanced: [{ torch: false } as MediaTrackConstraintSet] }); } catch {}
+        torchOnRef.current = false;
+      }
       const r = readerRef.current as { reset?: () => void } | null;
       r?.reset?.();
     };
@@ -110,6 +128,7 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
     const next = !torchOn;
     try {
       await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      torchOnRef.current = next;
       setTorchOn(next);
     } catch {}
   }

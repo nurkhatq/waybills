@@ -151,13 +151,34 @@ export default function PickerTaskPage() {
 
   // ── BULK MODE ────────────────────────────────────────────────────────────────
 
+  const [bulkWrongBarcode, setBulkWrongBarcode] = useState<string | null>(null);
+
   async function handleScanBulk(barcode: string) {
     if (!task || !scannerActive || processing) return;
-    // Первый скан → показываем ввод кол-ва
+
+    // Сразу проверяем: если ожидаемый штрихкод известен и не совпал — говорим немедленно
+    const expected = task.expected_barcode;
+    if (expected && barcode !== expected) {
+      setBulkWrongBarcode(barcode);
+      return; // камеру не останавливаем — пусть попробует снова
+    }
+
+    setBulkWrongBarcode(null);
     setScannerActive(false);
     setBulkBarcode(barcode);
     const remaining = task.orders.filter(o => !o.scan).length;
-    setBulkQty(remaining); // по умолчанию всё что осталось
+    setBulkQty(remaining);
+    setTimeout(() => qtyInputRef.current?.focus(), 100);
+  }
+
+  function handleBulkWrongConfirm() {
+    // Сборщик говорит «всё равно правильный» — принимаем этот штрихкод
+    if (!bulkWrongBarcode) return;
+    setBulkWrongBarcode(null);
+    setScannerActive(false);
+    setBulkBarcode(bulkWrongBarcode);
+    const remaining = task?.orders.filter(o => !o.scan).length ?? 0;
+    setBulkQty(remaining);
     setTimeout(() => qtyInputRef.current?.focus(), 100);
   }
 
@@ -355,9 +376,31 @@ export default function PickerTaskPage() {
         {/* ── Камера ── */}
         {isMyTask && !allDone && !isBulkEntry && (
           <div className="space-y-3">
+            {/* Ошибка неверного ШК в bulk-режиме — показываем сразу при скане */}
+            {bulkWrongBarcode && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-red-800">⚠️ Неверный штрихкод</p>
+                <p className="text-xs text-red-600 font-mono break-all">{bulkWrongBarcode}</p>
+                <p className="text-xs text-red-500">Ожидается товар: <span className="font-semibold">{task.product_name}</span></p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setBulkWrongBarcode(null); }}
+                    className="flex-1 bg-gray-100 text-gray-700 rounded-xl py-2.5 text-sm font-semibold"
+                  >
+                    Пересканировать
+                  </button>
+                  <button
+                    onClick={handleBulkWrongConfirm}
+                    className="flex-1 bg-green-600 text-white rounded-xl py-2.5 text-sm font-semibold"
+                  >
+                    Всё равно верно
+                  </button>
+                </div>
+              </div>
+            )}
             <BarcodeScanner
               onScan={scanMode === "per-order" ? handleScanPerOrder : handleScanBulk}
-              active={scannerActive && !unknownModal && !processing}
+              active={scannerActive && !unknownModal && !processing && !bulkWrongBarcode}
             />
             {scanMode === "per-order" && (
               <button
@@ -368,7 +411,7 @@ export default function PickerTaskPage() {
                 🚫 Нет штрихкода на товаре
               </button>
             )}
-            {scanMode === "bulk" && (
+            {scanMode === "bulk" && !bulkWrongBarcode && (
               <p className="text-xs text-center text-gray-400">Отсканируйте штрихкод любого товара из задания</p>
             )}
           </div>
