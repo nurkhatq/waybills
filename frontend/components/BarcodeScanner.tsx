@@ -86,7 +86,7 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
             try {
               const results = await readBarcodes(imageData, {
                 tryHarder: true,
-                formats: ["LinearCodes"], // только 1D штрихкоды, без QR/DataMatrix/Aztec
+                formats: ["Linear-Codes"], // только 1D штрихкоды, без QR/DataMatrix/Aztec
                 maxSymbols: 1,
               });
 
