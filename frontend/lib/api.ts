@@ -209,28 +209,33 @@ export const api = {
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
 
+    // Iframe на весь экран — Chrome PDF viewer рендерит все страницы только при полном размере
     const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;";
+    iframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;border:none;";
     iframe.src = blobUrl;
     document.body.appendChild(iframe);
 
     await new Promise<void>((resolve, reject) => {
       iframe.onload = () => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
+        // Доп. пауза чтобы PDF viewer отрендерил все страницы
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        }, 1500);
       };
       iframe.onerror = () => reject(new Error("Не удалось загрузить PDF"));
+      setTimeout(() => reject(new Error("Таймаут загрузки PDF")), 30_000);
     });
 
     setTimeout(() => {
-      document.body.removeChild(iframe);
+      try { document.body.removeChild(iframe); } catch {}
       URL.revokeObjectURL(blobUrl);
-    }, 60_000);
+    }, 30_000);
   },
 };
 

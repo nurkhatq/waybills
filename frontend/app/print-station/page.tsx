@@ -12,7 +12,7 @@ import { api, picker, PrintJob, loadUser } from "@/lib/api";
  */
 
 const POLL_INTERVAL_MS = 5_000;
-const PRINT_COOLDOWN_MS = 8_000; // ждём после window.print() перед следующим
+const PRINT_COOLDOWN_MS = 20_000; // ждём после window.print() перед следующим
 
 export default function PrintStationPage() {
   const router = useRouter();
