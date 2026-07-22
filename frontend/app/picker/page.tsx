@@ -88,9 +88,11 @@ export default function PickerPage() {
   const inSession = data?.in_session ?? false;
   const tasks = data?.tasks ?? [];
   const activeSessions = data?.active_sessions_count ?? 0;
-  const pendingTasks = tasks.filter(t => t.scanned_qty === 0);
-  const inProgressTasks = tasks.filter(t => t.scanned_qty > 0 && t.scanned_qty < t.total_orders);
-  const doneTasks = tasks.filter(t => t.scanned_qty === t.total_orders);
+  const sortZA = (arr: PickerTask[]) =>
+    [...arr].sort((a, b) => (b.product_name ?? "").localeCompare(a.product_name ?? "", "ru"));
+  const pendingTasks = sortZA(tasks.filter(t => t.scanned_qty === 0));
+  const inProgressTasks = sortZA(tasks.filter(t => t.scanned_qty > 0 && t.scanned_qty < t.total_orders));
+  const doneTasks = sortZA(tasks.filter(t => t.scanned_qty === t.total_orders));
 
   return (
     <div className="min-h-screen bg-gray-50 pb-10">
@@ -226,8 +228,9 @@ function TaskCard({ task, username, router }: { task: PickerTask; username: stri
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 truncate">
-          #{task.id}{task.product_name ? ` · ${task.product_name}` : ""}
+        <p className="text-xs text-gray-400">#{task.id}</p>
+        <p className="text-sm font-semibold text-gray-900 leading-tight">
+          {task.product_name ?? "—"}
         </p>
         <p className="text-xs text-gray-500">
           {task.total_orders} заказ{task.total_orders === 1 ? "" : task.total_orders < 5 ? "а" : "ов"}

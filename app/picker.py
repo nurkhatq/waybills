@@ -79,49 +79,33 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
 
     inv = get_inventory()
 
-    # Группируем по main_sku (через primary_sku из Order, уже resolved при сортировке)
-    # Заказы с несколькими позициями (num_positions > 1) сразу идут в тип B —
-    # они содержат разные SKU и не могут быть частью одноимённого A-sweep.
-    groups: dict[str, list] = defaultdict(list)
-    multi_position_items = []  # сразу в тип B
+    # Один SKU = одна задача (без лимита batch size).
+    # Тип A: 5+ заказов одного SKU (bulk scan).
+    # Тип B: 1-4 заказа одного SKU (per-order scan).
+    # Мультипозиционные заказы (разные SKU в одном заказе) → отдельные задачи по primary_sku.
+    single_groups: dict[str, list] = defaultdict(list)  # sku → [(o, entries)]
+    multi_groups: dict[str, list] = defaultdict(list)   # primary_sku → [(o, entries)]
+
     for o in orders_db:
         entries = json.loads(o.entries_json or "[]")
         if not entries:
             continue
         if o.num_positions > 1:
-            brand = inv.brand(o.primary_sku or "") if o.primary_sku else ""
-            multi_position_items.append((brand, o.primary_sku or "", o, entries))
-            continue
-        first_offer = (entries[0].get("offer") or {}).get("code", "")
-        main_sku = inv.resolve(first_offer) if first_offer else (o.primary_sku or "")
-        groups[main_sku].append((o, entries))
-
-    type_a_skus = {sku for sku, items in groups.items() if len(items) >= MASS_THRESHOLD}
-
-    type_b_items = []
-    for sku, items in groups.items():
-        if sku not in type_a_skus:
-            brand = inv.brand(sku) if sku else ""
-            for o, entries in items:
-                type_b_items.append((brand, sku, o, entries))
-    # Многопозиционные заказы добавляем в конец типа B
-    type_b_items.extend(multi_position_items)
-
-    type_b_items.sort(key=lambda x: _brand_sort_key(x[0]))
+            multi_groups[o.primary_sku or ""].append((o, entries))
+        else:
+            first_offer = (entries[0].get("offer") or {}).get("code", "")
+            main_sku = inv.resolve(first_offer) if first_offer else (o.primary_sku or "")
+            single_groups[main_sku].append((o, entries))
 
     created = 0
 
-    # Тип A: один SKU, несколько заказов
-    for sku in type_a_skus:
-        items = groups[sku]
-        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
-        task_orders = []
+    def _make_task_orders_single(sku, items, info):
+        result = []
         for o, entries in items:
             first_entry = entries[0] if entries else {}
-            # Название из Kaspi entries (всегда есть), инвентарь только для ШК и is_kit
             name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", "") or sku
             offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
-            task_orders.append({
+            result.append({
                 "order_code": o.order_code,
                 "kaspi_order_id": None,
                 "offer_code": offer_code,
@@ -130,11 +114,17 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                 "expected_barcode": info.get("barcode"),
                 "is_kit": info.get("is_kit", False),
             })
-        # product_name берём из первого заказа (из Kaspi), не из инвентаря
+        return result
+
+    # Один SKU → одна задача
+    for sku, items in single_groups.items():
+        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
+        task_type = "A" if len(items) >= MASS_THRESHOLD else "B"
+        task_orders = _make_task_orders_single(sku, items, info)
         display_name = task_orders[0]["name"] if task_orders else (info.get("name") or sku)
         db.add(models.PickerTask(
             city=city,
-            task_type="A",
+            task_type=task_type,
             offer_code=sku,
             product_name=display_name,
             expected_barcode=info.get("barcode"),
@@ -145,48 +135,33 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         ))
         created += 1
 
-    # Тип B: пачки по BATCH_SIZE
-    batch: list = []
-    for brand, sku, o, entries in type_b_items:
+    # Мультипозиционные → одна задача на primary_sku группу
+    for sku, items in multi_groups.items():
         info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
-        if o.num_positions > 1:
-            # Мультипозиционный заказ: показываем все позиции через " + "
+        task_orders = []
+        for o, entries in items:
             names = [(e.get("offer") or {}).get("name", "") for e in entries if (e.get("offer") or {}).get("name")]
-            name = " + ".join(names) if names else sku
+            name = " + ".join(names) if names else (info.get("name") or sku)
             offer_code = (entries[0].get("offer") or {}).get("code", "") or sku
-        else:
-            first_entry = entries[0] if entries else {}
-            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
-            offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
-        batch.append({
-            "order_code": o.order_code,
-            "kaspi_order_id": None,
-            "offer_code": offer_code,
-            "name": name,
-            "quantity": o.total_qty,
-            "expected_barcode": info.get("barcode"),
-            "is_kit": info.get("is_kit", False),
-            "num_positions": o.num_positions,
-        })
-        if len(batch) >= BATCH_SIZE:
-            db.add(models.PickerTask(
-                city=city,
-                task_type="B",
-                orders_json=json.dumps(batch, ensure_ascii=False),
-                total_orders=len(batch),
-                total_qty=sum(item["quantity"] for item in batch),
-                waybill_job_id=job_id,
-            ))
-            created += 1
-            batch = []
-
-    if batch:
+            task_orders.append({
+                "order_code": o.order_code,
+                "kaspi_order_id": None,
+                "offer_code": offer_code,
+                "name": name,
+                "quantity": o.total_qty,
+                "expected_barcode": None,
+                "is_kit": False,
+                "num_positions": o.num_positions,
+            })
+        display_name = task_orders[0]["name"] if task_orders else (info.get("name") or sku)
         db.add(models.PickerTask(
             city=city,
             task_type="B",
-            orders_json=json.dumps(batch, ensure_ascii=False),
-            total_orders=len(batch),
-            total_qty=sum(item["quantity"] for item in batch),
+            offer_code=sku,
+            product_name=display_name,
+            orders_json=json.dumps(task_orders, ensure_ascii=False),
+            total_orders=len(task_orders),
+            total_qty=sum(item["quantity"] for item in task_orders),
             waybill_job_id=job_id,
         ))
         created += 1
@@ -284,12 +259,13 @@ def build_picker_tasks(city: str, db: Session) -> int:
         ))
         created += 1
 
-    # Тип B (пачки по BATCH_SIZE)
-    batch: list = []
-    for brand, sku, o in type_b_items:
-        info = inv.product_info(sku) if sku else {"name": o.name or sku, "barcode": None, "is_kit": False}
+    # Тип B: один SKU → одна задача (без лимита batch size)
+    for sku, ords in groups.items():
+        if sku in type_a_skus:
+            continue
+        info = inv.product_info(sku) if sku else {"name": ords[0].name or sku, "barcode": None, "is_kit": False}
         is_kit = info.get("is_kit", False)
-        batch.append({
+        batch = [{
             "order_code": o.code,
             "kaspi_order_id": o.kaspi_order_id,
             "offer_code": o.offer_code or sku,
@@ -297,24 +273,14 @@ def build_picker_tasks(city: str, db: Session) -> int:
             "quantity": o.quantity,
             "expected_barcode": info.get("barcode"),
             "is_kit": is_kit,
-        })
-        if len(batch) >= BATCH_SIZE:
-            db.add(models.PickerTask(
-                city=city,
-                task_type="B",
-                product_name=batch[0]["name"] if batch else None,
-                orders_json=json.dumps(batch, ensure_ascii=False),
-                total_orders=len(batch),
-                total_qty=sum(item["quantity"] for item in batch),
-            ))
-            created += 1
-            batch = []
-
-    if batch:
+        } for o in ords]
+        display_name = batch[0]["name"] if batch else (info.get("name") or sku)
         db.add(models.PickerTask(
             city=city,
             task_type="B",
-            product_name=batch[0]["name"] if batch else None,
+            offer_code=sku,
+            product_name=display_name,
+            expected_barcode=info.get("barcode"),
             orders_json=json.dumps(batch, ensure_ascii=False),
             total_orders=len(batch),
             total_qty=sum(item["quantity"] for item in batch),

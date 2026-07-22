@@ -290,8 +290,8 @@ export default function PickerTaskPage() {
           </div>
         )}
 
-        {/* ── Режим сканирования (только тип A) ── */}
-        {isTypeA && isMyTask && !allDone && (
+        {/* ── Режим сканирования ── */}
+        {isMyTask && !allDone && (
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-3">
             <span className="text-xs text-gray-500 mr-1">Режим:</span>
             <button
