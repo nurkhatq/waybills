@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { picker, api, PickerTask, PickerOrderItem, loadUser } from "@/lib/api";
+import { picker, PickerTask, PickerOrderItem, loadUser } from "@/lib/api";
 
 const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), { ssr: false });
 
@@ -59,8 +59,6 @@ export default function PickerTaskPage() {
   // Модал завершения
   const [doneModal, setDoneModal] = useState(false);
 
-  // Экран после завершения — печать
-  const [printScreen, setPrintScreen] = useState<{ jobId: number; filenames: string[] } | null>(null);
 
   const loadTask = useCallback(async () => {
     try {
@@ -219,14 +217,10 @@ export default function PickerTaskPage() {
     try {
       const result = await picker.complete(taskId);
       setDoneModal(false);
-      if (result.waybill_job_id && result.pdf_filenames && result.pdf_filenames.length > 0) {
-        setPrintScreen({ jobId: result.waybill_job_id, filenames: result.pdf_filenames });
-      } else if (result.assemble_errors && result.assemble_errors.length > 0) {
+      if (result.assemble_errors && result.assemble_errors.length > 0) {
         setError(`Выполнено. Ошибки передачи в Kaspi (${result.assemble_errors.length}): ${result.assemble_errors.slice(0, 3).join(", ")}`);
-        router.push("/picker");
-      } else {
-        router.push("/picker");
       }
+      router.push("/picker");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     }
@@ -515,36 +509,6 @@ export default function PickerTaskPage() {
                 Пересканировать
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Экран печати накладных ── */}
-      {printScreen && (
-        <div className="fixed inset-0 bg-green-50 flex items-center justify-center z-50 p-6">
-          <div className="w-full max-w-sm space-y-5 text-center">
-            <p className="text-5xl">✅</p>
-            <p className="text-xl font-bold text-green-800">Задание выполнено!</p>
-            <div className="bg-white rounded-2xl border border-green-200 p-4 space-y-3">
-              <p className="text-sm font-semibold text-gray-700">Распечатайте накладные для упаковки:</p>
-              {printScreen.filenames.map(filename => (
-                <a
-                  key={filename}
-                  href={api.pdfUrl(printScreen.jobId, filename)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 bg-blue-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-blue-700"
-                >
-                  🖨 {filename}
-                </a>
-              ))}
-            </div>
-            <button
-              onClick={() => router.push("/picker")}
-              className="text-sm text-blue-600 underline"
-            >
-              Перейти к следующему заданию →
-            </button>
           </div>
         </div>
       )}

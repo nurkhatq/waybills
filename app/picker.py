@@ -16,6 +16,10 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
+import io
+import os
+import requests as _requests
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -24,6 +28,7 @@ from .auth import get_current_user
 from .db import get_db
 from . import models, kaspi
 from .inventory import get_inventory
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +342,75 @@ def _resolve_scan_status(barcode: str | None, order: dict, inv) -> str:
 
     # Штрихкод известен, но не совпадает с ожидаемым
     return "unknown_barcode"
+
+
+# ─── Print PDF builder ────────────────────────────────────────────────────────
+
+def _build_picker_pdf(task: models.PickerTask, db: Session) -> str | None:
+    """
+    Скачивает накладные только для заказов этой picker-задачи и склеивает в PDF.
+    Возвращает имя файла (не полный путь) или None при ошибке.
+    """
+    if not task.waybill_job_id:
+        return None
+
+    from pypdf import PdfWriter, PdfReader
+
+    order_codes = [o["order_code"] for o in json.loads(task.orders_json or "[]")]
+    if not order_codes:
+        return None
+
+    filename = f"picker_{task.id}.pdf"
+    output_path = os.path.join(settings.data_dir, str(task.waybill_job_id), filename)
+
+    if os.path.exists(output_path):
+        return filename
+
+    # Waybill URL из таблицы orders
+    db_orders = (
+        db.query(models.Order)
+        .filter(
+            models.Order.job_id == task.waybill_job_id,
+            models.Order.order_code.in_(order_codes),
+        )
+        .all()
+    )
+    url_map = {o.order_code: o.waybill_url for o in db_orders if o.waybill_url}
+
+    sess = _requests.Session()
+    sess.headers.update({
+        "X-Auth-Token": settings.kaspi_token,
+        "User-Agent": "MyKaspiIntegration/1.0 (MyStore)",
+        "Accept": "*/*",
+    })
+
+    writer = PdfWriter()
+    found = 0
+
+    for code in order_codes:
+        url = url_map.get(code)
+        if not url:
+            continue
+        try:
+            resp = sess.get(url, timeout=15)
+            if resp.ok and resp.content:
+                reader = PdfReader(io.BytesIO(resp.content))
+                for page in reader.pages:
+                    writer.add_page(page)
+                found += 1
+        except Exception as e:
+            logger.warning(f"picker_pdf: не удалось скачать {code}: {e}")
+
+    if found == 0:
+        logger.warning(f"picker_pdf: нет доступных накладных для task {task.id}")
+        return None
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+
+    logger.info(f"picker_pdf: собран {filename} ({found} накладных)")
+    return filename
 
 
 # ─── Session helpers ──────────────────────────────────────────────────────────
@@ -659,34 +733,23 @@ def complete_task(
     if errors:
         logger.warning(f"picker task {task_id}: assemble_order failed for {errors}")
 
-    # Создаём задания на печать (дедупликация по (waybill_job_id, filename))
+    # Строим PDF только с накладными этой задачи → очередь на принт-станцию
     pdf_filenames: list[str] = []
     if task.waybill_job_id:
-        import json as _json
-        job = db.get(models.Job, task.waybill_job_id)
-        if job and job.pdf_files_json:
-            try:
-                files = _json.loads(job.pdf_files_json)
-                pdf_filenames = [
-                    f["filename"] if isinstance(f, dict) else str(f)
-                    for f in files
-                ]
-                # Создаём print job для каждого PDF (один раз на файл)
-                for fname in pdf_filenames:
-                    already = db.query(models.PickerPrintJob).filter(
-                        models.PickerPrintJob.waybill_job_id == task.waybill_job_id,
-                        models.PickerPrintJob.filename == fname,
-                    ).first()
-                    if not already:
-                        db.add(models.PickerPrintJob(
-                            city=task.city,
-                            waybill_job_id=task.waybill_job_id,
-                            filename=fname,
-                            picker_task_id=task_id,
-                        ))
+        try:
+            fname = _build_picker_pdf(task, db)
+            if fname:
+                pdf_filenames = [fname]
+                # Каждая picker-задача = отдельный print job
+                db.add(models.PickerPrintJob(
+                    city=task.city,
+                    waybill_job_id=task.waybill_job_id,
+                    filename=fname,
+                    picker_task_id=task_id,
+                ))
                 db.commit()
-            except Exception:
-                pass
+        except Exception as e:
+            logger.warning(f"picker_pdf build failed for task {task_id}: {e}")
 
     return {
         "task_id": task_id,
