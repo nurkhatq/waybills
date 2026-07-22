@@ -268,7 +268,7 @@ export default function PickerTaskPage() {
                 }`}>{task.task_type}</span>
               </h1>
               {task.product_name && (
-                <p className="text-xs text-gray-500 truncate max-w-xs">{task.product_name}</p>
+                <p className="text-xs text-gray-500 leading-tight">{task.product_name}</p>
               )}
             </div>
             <button onClick={() => router.push("/picker")} className="text-sm text-blue-600">
@@ -435,6 +435,44 @@ export default function PickerTaskPage() {
           </div>
         )}
 
+        {/* ── Состав пачки (только тип B) ── */}
+        {!isTypeA && (() => {
+          const uniq = new Map<string, { name: string; qty: number; barcode: string | null; is_kit: boolean }>();
+          task.orders.forEach(o => {
+            const key = o.offer_code ?? o.name;
+            const ex = uniq.get(key);
+            if (ex) ex.qty += o.quantity ?? 1;
+            else uniq.set(key, {
+              name: o.name,
+              qty: o.quantity ?? 1,
+              barcode: o.expected_barcode ?? null,
+              is_kit: !!(o as PickerOrderItem & { is_kit?: boolean }).is_kit,
+            });
+          });
+          return (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Состав пачки</p>
+              {[...uniq.values()].map((item, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-blue-400 text-xs mt-0.5">•</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-800 leading-tight">{item.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.qty > 1 && <span className="mr-2">×{item.qty}</span>}
+                      {item.is_kit
+                        ? <span className="text-purple-600">Комплект</span>
+                        : item.barcode
+                          ? <span className="font-mono text-gray-400">{item.barcode}</span>
+                          : <span className="text-orange-500">Нет ШК в системе</span>
+                      }
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* ── Список заказов ── */}
         <div>
           <h2 className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">
@@ -444,22 +482,32 @@ export default function PickerTaskPage() {
             {task.orders.map((order) => {
               const st = order.scan?.match_status as ScanStatus | undefined;
               const isCurrent = order.order_code === currentOrder?.order_code;
+              const expectedBc = order.expected_barcode ?? (isTypeA ? task.expected_barcode : null);
+              const isKit = !!(order as PickerOrderItem & { is_kit?: boolean }).is_kit;
               return (
                 <div
                   key={order.order_code}
-                  className={`bg-white rounded-xl border p-3 flex items-center gap-3 ${
+                  className={`bg-white rounded-xl border p-3 flex items-start gap-3 ${
                     isCurrent && !allDone ? "border-blue-400 border-2" : "border-gray-100"
                   }`}
                 >
-                  <span className="text-lg shrink-0">{matchIcon(st)}</span>
+                  <span className="text-lg shrink-0 mt-0.5">{matchIcon(st)}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{order.name}</p>
-                    <p className="text-xs text-gray-400">{order.order_code}</p>
+                    <p className="text-sm font-medium text-gray-900 leading-tight">{order.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{order.order_code}{order.quantity > 1 ? ` · ${order.quantity} шт` : ""}</p>
+                    <p className="text-xs mt-0.5">
+                      {isKit
+                        ? <span className="text-purple-500">Комплект — любой компонент</span>
+                        : expectedBc
+                          ? <span className="font-mono text-gray-400">{expectedBc}</span>
+                          : <span className="text-orange-500">Нет ШК в системе</span>
+                      }
+                    </p>
                     {order.scan?.barcode_scanned && (
-                      <p className="text-xs text-gray-400 font-mono">{order.scan.barcode_scanned}</p>
+                      <p className="text-xs text-green-600 font-mono mt-0.5">✓ {order.scan.barcode_scanned}</p>
                     )}
                   </div>
-                  <span className={`text-xs font-medium shrink-0 ${
+                  <span className={`text-xs font-medium shrink-0 mt-0.5 ${
                     st === "matched" ? "text-green-600" :
                     st === "unknown_barcode" ? "text-yellow-600" :
                     st === "no_barcode" ? "text-red-500" :

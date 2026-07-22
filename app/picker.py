@@ -302,6 +302,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
             db.add(models.PickerTask(
                 city=city,
                 task_type="B",
+                product_name=batch[0]["name"] if batch else None,
                 orders_json=json.dumps(batch, ensure_ascii=False),
                 total_orders=len(batch),
                 total_qty=sum(item["quantity"] for item in batch),
@@ -313,6 +314,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
         db.add(models.PickerTask(
             city=city,
             task_type="B",
+            product_name=batch[0]["name"] if batch else None,
             orders_json=json.dumps(batch, ensure_ascii=False),
             total_orders=len(batch),
             total_qty=sum(item["quantity"] for item in batch),
