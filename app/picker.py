@@ -100,11 +100,12 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     # Тип A: один SKU, несколько заказов
     for sku in type_a_skus:
         items = groups[sku]
-        info = inv.product_info(sku) if sku else {"name": sku, "barcode": None, "is_kit": False}
+        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
         task_orders = []
         for o, entries in items:
             first_entry = entries[0] if entries else {}
-            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
+            # Название из Kaspi entries (всегда есть), инвентарь только для ШК и is_kit
+            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", "") or sku
             offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
             task_orders.append({
                 "order_code": o.order_code,
@@ -115,11 +116,13 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                 "expected_barcode": info.get("barcode"),
                 "is_kit": info.get("is_kit", False),
             })
+        # product_name берём из первого заказа (из Kaspi), не из инвентаря
+        display_name = task_orders[0]["name"] if task_orders else (info.get("name") or sku)
         db.add(models.PickerTask(
             city=city,
             task_type="A",
             offer_code=sku,
-            product_name=info.get("name", sku),
+            product_name=display_name,
             expected_barcode=info.get("barcode"),
             orders_json=json.dumps(task_orders, ensure_ascii=False),
             total_orders=len(task_orders),
