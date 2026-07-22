@@ -266,6 +266,19 @@ export interface PickerTask {
   created_at: string | null;
   claimed_at: string | null;
   completed_at: string | null;
+  waybill_job_id: number | null;
+}
+
+export interface PickerSessionInfo {
+  id: number;
+  started_at: string;
+}
+
+export interface MySessionResponse {
+  in_session: boolean;
+  session: PickerSessionInfo | null;
+  tasks: PickerTask[];
+  active_sessions_count: number;
 }
 
 export interface PickerTasksResponse {
@@ -312,7 +325,7 @@ export const picker = {
     }),
 
   complete: (taskId: number) =>
-    req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number; assembled_in_kaspi?: number; assemble_errors?: string[] }>(
+    req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number; assembled_in_kaspi?: number; assemble_errors?: string[]; waybill_job_id?: number | null; pdf_filenames?: string[] }>(
       `/picker/tasks/${taskId}/complete`,
       { method: "POST" }
     ),
@@ -322,6 +335,20 @@ export const picker = {
 
   lookupBarcode: (barcode: string) =>
     req<BarcodeLookup>(`/picker/lookup/barcode/${encodeURIComponent(barcode)}`),
+
+  mySession: () => req<MySessionResponse>("/picker/sessions/me"),
+
+  startSession: () =>
+    req<{ session_id: number; assigned: number; already_active?: boolean }>(
+      "/picker/sessions/start",
+      { method: "POST" }
+    ),
+
+  endSession: () =>
+    req<{ ended: boolean; released_tasks: number }>(
+      "/picker/sessions/end",
+      { method: "POST" }
+    ),
 };
 
 export function saveSession(token: string, user: User) {
