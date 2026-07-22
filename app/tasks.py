@@ -11,6 +11,7 @@ import traceback
 from sqlalchemy.orm import Session
 
 from . import kaspi, label_service, pdf_service, models
+from .picker import build_picker_tasks
 from .celery_app import celery
 from .config import settings
 from .db import SessionLocal
@@ -69,6 +70,15 @@ def fetch_assembly_job(self, job_id):
         job.progress = 100
         job.progress_label = ""
         db.commit()
+
+        # Автоматически (пере)создаём picker tasks: удаляем старые pending и строим новые
+        db.query(models.PickerTask).filter(
+            models.PickerTask.city == job.city,
+            models.PickerTask.status == "pending",
+        ).delete()
+        db.commit()
+        build_picker_tasks(job.city, db)
+
         old_jobs = (
             db.query(models.AssemblyJob)
             .filter(models.AssemblyJob.city == job.city, models.AssemblyJob.id != job_id)

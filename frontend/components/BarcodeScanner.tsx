@@ -16,8 +16,22 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<unknown>(null);
   const pausedUntil = useRef<number>(0);
+  // Refs для актуальных значений внутри ZXing callback (closure fix)
+  const activeRef = useRef(active);
+  const onScanRef = useRef(onScan);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) {
+      pausedUntil.current = 0; // сбрасываем паузу при повторной активации
+    }
+  }, [active]);
+
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
 
   useEffect(() => {
     let stopped = false;
@@ -30,7 +44,6 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
         if (stopped || !videoRef.current) return;
 
-        // Непрерывное декодирование с камеры
         await reader.decodeFromConstraints(
           {
             video: {
@@ -40,14 +53,14 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
             },
           },
           videoRef.current,
-          (result, err) => {
+          (result) => {
             if (stopped) return;
             if (result) {
               const now = Date.now();
               if (now < pausedUntil.current) return;
-              if (!active) return;
+              if (!activeRef.current) return;
               pausedUntil.current = now + pauseMs;
-              onScan(result.getText());
+              onScanRef.current(result.getText());
             }
           }
         );

@@ -37,7 +37,9 @@ export default function PickerTaskPage() {
   const [username, setUsername] = useState<string | null>(null);
 
   // Режим: per-order (по заказу) или bulk (скан + кол-во, только тип A)
+  // Тип A по умолчанию — bulk (быстрый режим)
   const [scanMode, setScanMode] = useState<ScanMode>("per-order");
+  const [modeInitialized, setModeInitialized] = useState(false);
 
   // Текущий заказ (per-order)
   const [currentOrder, setCurrentOrder] = useState<PickerOrderItem | null>(null);
@@ -62,13 +64,18 @@ export default function PickerTaskPage() {
       const t = await picker.getTask(taskId);
       setTask(t);
       setCurrentOrder(nextPending(t));
+      // Тип A → по умолчанию быстрый режим (bulk)
+      if (!modeInitialized) {
+        if (t.task_type === "A") setScanMode("bulk");
+        setModeInitialized(true);
+      }
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
       setLoading(false);
     }
-  }, [taskId]);
+  }, [taskId, modeInitialized]);
 
   function nextPending(t: PickerTask): PickerOrderItem | null {
     return t.orders.find(o => !o.scan) ?? null;
