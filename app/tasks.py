@@ -11,7 +11,7 @@ import traceback
 from sqlalchemy.orm import Session
 
 from . import kaspi, label_service, pdf_service, models
-from .picker import build_picker_tasks
+from .picker import build_picker_tasks_from_job
 from .celery_app import celery
 from .config import settings
 from .db import SessionLocal
@@ -70,15 +70,6 @@ def fetch_assembly_job(self, job_id):
         job.progress = 100
         job.progress_label = ""
         db.commit()
-
-        # Автоматически (пере)создаём picker tasks: удаляем старые pending и строим новые
-        db.query(models.PickerTask).filter(
-            models.PickerTask.city == job.city,
-            models.PickerTask.status == "pending",
-        ).delete()
-        db.commit()
-        build_picker_tasks(job.city, db)
-
         old_jobs = (
             db.query(models.AssemblyJob)
             .filter(models.AssemblyJob.city == job.city, models.AssemblyJob.id != job_id)
@@ -355,6 +346,17 @@ def _finalize_pdfs(db, job, batches, labels: dict = None):
     job.orders_printed = total_count
     _update_progress(db, job, 100, "")
     _update_status(db, job, "pdf_ready")
+
+    # Автоматически создаём picker tasks из этих же заказов
+    try:
+        db.query(models.PickerTask).filter(
+            models.PickerTask.city == job.city,
+            models.PickerTask.status == "pending",
+        ).delete()
+        db.commit()
+        build_picker_tasks_from_job(job.id, job.city, db)
+    except Exception as e:
+        logger.warning(f"build_picker_tasks_from_job failed for job {job.id}: {e}")
 
 
 # Smart-mode: генерация PDF после выбора пользователя

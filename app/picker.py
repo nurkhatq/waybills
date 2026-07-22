@@ -62,6 +62,117 @@ def _brand_sort_key(brand: str) -> tuple:
     return (1 if _is_cyrillic(b) else 0, b)
 
 
+def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
+    """
+    Строит picker_tasks из заказов Job (накладные, assembled=True).
+    В отличие от build_picker_tasks — не вызывает assemble_order при complete(),
+    т.к. заказы уже assembled. Задачи помечаются waybill_job_id=job_id.
+    """
+    orders_db = db.query(models.Order).filter(models.Order.job_id == job_id).all()
+    if not orders_db:
+        return 0
+
+    inv = get_inventory()
+
+    # Группируем по main_sku (через primary_sku из Order, уже resolved при сортировке)
+    groups: dict[str, list] = defaultdict(list)
+    for o in orders_db:
+        entries = json.loads(o.entries_json or "[]")
+        if not entries:
+            continue
+        first_offer = (entries[0].get("offer") or {}).get("code", "")
+        main_sku = inv.resolve(first_offer) if first_offer else (o.primary_sku or "")
+        groups[main_sku].append((o, entries))
+
+    type_a_skus = {sku for sku, items in groups.items() if len(items) >= MASS_THRESHOLD}
+
+    type_b_items = []
+    for sku, items in groups.items():
+        if sku not in type_a_skus:
+            brand = inv.brand(sku) if sku else ""
+            for o, entries in items:
+                type_b_items.append((brand, sku, o, entries))
+
+    type_b_items.sort(key=lambda x: _brand_sort_key(x[0]))
+
+    created = 0
+
+    # Тип A: один SKU, несколько заказов
+    for sku in type_a_skus:
+        items = groups[sku]
+        info = inv.product_info(sku) if sku else {"name": sku, "barcode": None, "is_kit": False}
+        task_orders = []
+        for o, entries in items:
+            first_entry = entries[0] if entries else {}
+            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
+            offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
+            task_orders.append({
+                "order_code": o.order_code,
+                "kaspi_order_id": None,
+                "offer_code": offer_code,
+                "name": name,
+                "quantity": o.total_qty,
+                "expected_barcode": info.get("barcode"),
+                "is_kit": info.get("is_kit", False),
+            })
+        db.add(models.PickerTask(
+            city=city,
+            task_type="A",
+            offer_code=sku,
+            product_name=info.get("name", sku),
+            expected_barcode=info.get("barcode"),
+            orders_json=json.dumps(task_orders, ensure_ascii=False),
+            total_orders=len(task_orders),
+            total_qty=sum(item["quantity"] for item in task_orders),
+            waybill_job_id=job_id,
+        ))
+        created += 1
+
+    # Тип B: пачки по BATCH_SIZE
+    batch: list = []
+    for brand, sku, o, entries in type_b_items:
+        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
+        first_entry = entries[0] if entries else {}
+        name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
+        offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
+        batch.append({
+            "order_code": o.order_code,
+            "kaspi_order_id": None,
+            "offer_code": offer_code,
+            "name": name,
+            "quantity": o.total_qty,
+            "expected_barcode": info.get("barcode"),
+            "is_kit": info.get("is_kit", False),
+            "num_positions": o.num_positions,
+        })
+        if len(batch) >= BATCH_SIZE:
+            db.add(models.PickerTask(
+                city=city,
+                task_type="B",
+                orders_json=json.dumps(batch, ensure_ascii=False),
+                total_orders=len(batch),
+                total_qty=sum(item["quantity"] for item in batch),
+                waybill_job_id=job_id,
+            ))
+            created += 1
+            batch = []
+
+    if batch:
+        db.add(models.PickerTask(
+            city=city,
+            task_type="B",
+            orders_json=json.dumps(batch, ensure_ascii=False),
+            total_orders=len(batch),
+            total_qty=sum(item["quantity"] for item in batch),
+            waybill_job_id=job_id,
+        ))
+        created += 1
+
+    db.commit()
+    logger.info(f"picker: built {created} waybill tasks for {city} from job {job_id}")
+    return created
+
+
 def build_picker_tasks(city: str, db: Session) -> int:
     """
     Строит picker_tasks из последнего AssemblyJob для города.
@@ -489,20 +600,21 @@ def complete_task(
     scans = task.scans
     orders_list = json.loads(task.orders_json or "[]")
 
-    # Отправляем assemble_order в Kaspi только для успешно отсканированных
     scanned_codes = {
         s.order_code for s in scans
         if s.match_status in ("matched", "unknown_barcode", "no_barcode")
     }
     assembled_count = 0
     errors = []
-    for o in orders_list:
-        if o["order_code"] in scanned_codes:
-            ok = kaspi.assemble_order(o["kaspi_order_id"], o["order_code"])
-            if ok:
-                assembled_count += 1
-            else:
-                errors.append(o["order_code"])
+    # Waybill-задачи (из накладных) — заказы уже assembled, assemble_order не нужен
+    if task.waybill_job_id is None:
+        for o in orders_list:
+            if o["order_code"] in scanned_codes and o.get("kaspi_order_id"):
+                ok = kaspi.assemble_order(o["kaspi_order_id"], o["order_code"])
+                if ok:
+                    assembled_count += 1
+                else:
+                    errors.append(o["order_code"])
 
     if errors:
         logger.warning(f"picker task {task_id}: assemble_order failed for {errors}")

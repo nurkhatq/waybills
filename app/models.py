@@ -171,6 +171,10 @@ class PickerTask(Base):
     # Прогресс
     scanned_qty = Column(Integer, default=0)
 
+    # Если задача создана из Job (накладные) — хранит job.id; None = из AssemblyJob
+    # При waybill_job_id is not None — complete() не вызывает assemble_order (уже assembled)
+    waybill_job_id = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, default=now, index=True)
     claimed_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
