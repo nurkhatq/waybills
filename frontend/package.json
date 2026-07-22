@@ -9,11 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@zxing/browser": "^0.1.1",
-    "@zxing/library": "^0.21.3",
     "next": "latest",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "zxing-wasm": "^2"
   },
   "devDependencies": {
     "@types/node": "^20",

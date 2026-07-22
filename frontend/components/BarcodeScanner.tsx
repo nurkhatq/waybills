@@ -9,15 +9,14 @@ interface Props {
 
 export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const readerRef = useRef<unknown>(null);
   const pausedUntil = useRef<number>(0);
   const activeRef = useRef(active);
   const onScanRef = useRef(onScan);
   const trackRef = useRef<MediaStreamTrack | null>(null);
+  const torchOnRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const torchOnRef = useRef(false);
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -32,71 +31,79 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
   useEffect(() => {
     let stopped = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
 
     async function start() {
       try {
-        const { BrowserMultiFormatReader } = await import("@zxing/browser" as never) as never as {
-          BrowserMultiFormatReader: new (hints?: Map<number, unknown>, interval?: number) => {
-            decodeFromConstraints: (c: MediaStreamConstraints, v: HTMLVideoElement, cb: (r: unknown, e: unknown) => void) => Promise<void>;
-            reset: () => void;
-          };
-        };
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        });
 
-        // DecodeHintType.TRY_HARDER = 3 (из @zxing/library, не реэкспортируется в @zxing/browser)
-        const hints = new Map<number, unknown>();
-        hints.set(3, true);
+        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
 
-        // 100мс между попытками вместо дефолтных 500мс
-        const reader = new BrowserMultiFormatReader(hints, 100);
-        readerRef.current = reader;
+        const video = videoRef.current!;
+        video.srcObject = stream;
+        await video.play();
 
-        if (stopped || !videoRef.current) return;
-
-        await reader.decodeFromConstraints(
-          {
-            video: {
-              facingMode: "environment",
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-            },
-          },
-          videoRef.current,
-          (result: unknown) => {
-            if (stopped || !result) return;
-            const now = Date.now();
-            if (now < pausedUntil.current || !activeRef.current) return;
-            const text = (result as { getText: () => string }).getText();
-            // Игнорируем QR-коды (обычно ссылки или длинный текст)
-            if (text.includes("://") || text.startsWith("http")) return;
-            pausedUntil.current = now + pauseMs;
-            onScanRef.current(text);
-          }
-        );
-
-        // После запуска камеры получаем возможности трека
-        if (videoRef.current?.srcObject) {
-          const stream = videoRef.current.srcObject as MediaStream;
-          const track = stream.getVideoTracks()[0];
-          if (track) {
-            trackRef.current = track;
-            const caps = track.getCapabilities() as Record<string, unknown>;
-            if (caps.torch) setTorchSupported(true);
-            const zoomCap = caps.zoom as { min: number; max: number; step: number } | undefined;
-            if (zoomCap) {
-              setZoomRange({ min: zoomCap.min, max: Math.min(zoomCap.max, 4) });
-              // Default to 2× zoom if supported
-              const defaultZoom = Math.min(2, Math.min(zoomCap.max, 4));
-              if (defaultZoom > zoomCap.min) {
-                try {
-                  await track.applyConstraints({ advanced: [{ zoom: defaultZoom } as MediaTrackConstraintSet] });
-                  setZoom(defaultZoom);
-                } catch {}
-              }
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          trackRef.current = track;
+          const caps = track.getCapabilities() as Record<string, unknown>;
+          if (caps.torch) setTorchSupported(true);
+          const zoomCap = caps.zoom as { min: number; max: number } | undefined;
+          if (zoomCap) {
+            const maxZ = Math.min(zoomCap.max, 4);
+            setZoomRange({ min: zoomCap.min, max: maxZ });
+            const defaultZ = Math.min(2, maxZ);
+            if (defaultZ > zoomCap.min) {
+              try {
+                await track.applyConstraints({ advanced: [{ zoom: defaultZ } as MediaTrackConstraintSet] });
+                setZoom(defaultZ);
+              } catch {}
             }
           }
         }
 
+        // Динамический импорт — загружается только в браузере
+        const { readBarcodes } = await import("zxing-wasm/reader");
+
+        if (stopped) return;
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+
         setLoading(false);
+
+        async function scan() {
+          if (stopped) return;
+
+          if (activeRef.current && video.readyState >= 3 && video.videoWidth > 0) {
+            if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth;
+            if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            try {
+              const results = await readBarcodes(imageData, {
+                tryHarder: true,
+                formats: ["LinearCodes"], // только 1D штрихкоды, без QR/DataMatrix/Aztec
+                maxSymbols: 1,
+              });
+
+              if (!stopped && results.length > 0 && results[0].isValid) {
+                const now = Date.now();
+                if (now >= pausedUntil.current) {
+                  pausedUntil.current = now + pauseMs;
+                  onScanRef.current(results[0].text);
+                }
+              }
+            } catch {}
+          }
+
+          if (!stopped) timerId = setTimeout(scan, 100);
+        }
+
+        scan();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("Permission") || msg.includes("NotAllowed")) {
@@ -112,13 +119,16 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
     return () => {
       stopped = true;
-      // Выключаем фонарик при размонтировании
+      if (timerId) clearTimeout(timerId);
       if (torchOnRef.current && trackRef.current) {
         try { trackRef.current.applyConstraints({ advanced: [{ torch: false } as MediaTrackConstraintSet] }); } catch {}
         torchOnRef.current = false;
       }
-      const r = readerRef.current as { reset?: () => void } | null;
-      r?.reset?.();
+      const video = videoRef.current;
+      if (video?.srcObject) {
+        (video.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+      }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -159,16 +169,11 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
           </div>
         )}
         <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
-        {/* Угловые маркеры — вся площадь сканируется */}
         {!loading && (
-          <div className="absolute inset-0 pointer-events-none p-4">
-            {/* Верх-лево */}
+          <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-4 left-4 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl" />
-            {/* Верх-право */}
             <div className="absolute top-4 right-4 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr" />
-            {/* Низ-лево */}
             <div className="absolute bottom-4 left-4 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl" />
-            {/* Низ-право */}
             <div className="absolute bottom-4 right-4 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br" />
           </div>
         )}
@@ -177,7 +182,6 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
             Пауза…
           </div>
         )}
-        {/* Кнопка фонарика */}
         {torchSupported && !loading && (
           <button
             onClick={toggleTorch}
@@ -190,7 +194,6 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
         )}
       </div>
 
-      {/* Зум (если поддерживается) */}
       {zoomRange && !loading && (
         <div className="flex items-center gap-2 px-1">
           <button
@@ -203,9 +206,7 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
                 key={v}
                 onClick={() => applyZoom(v)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  Math.abs(zoom - v) < 0.1
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-600"
+                  Math.abs(zoom - v) < 0.1 ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"
                 }`}
               >
                 {v}×
