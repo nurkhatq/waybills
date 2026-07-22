@@ -2,6 +2,7 @@
 """
 Фоновые задачи Celery.
 """
+import datetime
 import json
 import logging
 import os
@@ -159,9 +160,17 @@ def process_job(self, job_id):
             _update_status(db, job, "done", "Нет заказов, готовых к передаче.")
             return
 
+        # Только джобы напечатанные СЕГОДНЯ — задержанные заказы из вчерашних джобов
+        # должны снова попасть в печать (курьеру ещё не передали)
+        today_start = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         printed_jobs = (
             db.query(models.Job)
-            .filter(models.Job.city == job.city, models.Job.printed_at.isnot(None), models.Job.id != job.id)
+            .filter(
+                models.Job.city == job.city,
+                models.Job.printed_at.isnot(None),
+                models.Job.printed_at >= today_start,
+                models.Job.id != job.id,
+            )
             .all()
         )
         if printed_jobs:
