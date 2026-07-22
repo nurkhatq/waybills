@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from celery import Celery
+from celery.schedules import crontab
 from .config import settings
 
 celery = Celery(
@@ -16,5 +17,12 @@ celery.conf.update(
     timezone="Asia/Almaty",
     task_track_started=True,
     worker_prefetch_multiplier=1,
-    task_acks_late=True,  # задача снимается с очереди только после успешного завершения
+    task_acks_late=True,
+    beat_schedule={
+        # Автозакрытие сессий сборщиков в 20:00 по KZ (Asia/Almaty = UTC+5)
+        "auto-close-picker-sessions": {
+            "task": "tasks.auto_close_picker_sessions",
+            "schedule": crontab(hour=20, minute=0),
+        },
+    },
 )

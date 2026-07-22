@@ -172,6 +172,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         created += 1
 
     db.commit()
+    _redistribute_tasks(city, db)
     logger.info(f"picker: built {created} waybill tasks for {city} from job {job_id}")
     return created
 
@@ -338,6 +339,41 @@ def _resolve_scan_status(barcode: str | None, order: dict, inv) -> str:
     return "unknown_barcode"
 
 
+# ─── Session helpers ──────────────────────────────────────────────────────────
+
+def _active_sessions(city: str, db: Session) -> list:
+    return (
+        db.query(models.PickerSession)
+        .filter(models.PickerSession.city == city, models.PickerSession.status == "active")
+        .order_by(models.PickerSession.started_at)
+        .all()
+    )
+
+
+def _redistribute_tasks(city: str, db: Session) -> int:
+    """Round-robin: раздать pending-задачи активным сессиям."""
+    sessions = _active_sessions(city, db)
+    if not sessions:
+        return 0
+    pending = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.status == "pending",
+        )
+        .order_by(models.PickerTask.id)
+        .all()
+    )
+    for i, task in enumerate(pending):
+        s = sessions[i % len(sessions)]
+        task.picker_username = s.username
+        task.status = "claimed"
+        task.claimed_at = datetime.now(timezone.utc)
+    if pending:
+        db.commit()
+    return len(pending)
+
+
 def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
     orders = json.loads(task.orders_json or "[]")
     scan_map = {}
@@ -366,6 +402,7 @@ def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "claimed_at": task.claimed_at.isoformat() if task.claimed_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "waybill_job_id": task.waybill_job_id,
     }
 
 
@@ -622,6 +659,35 @@ def complete_task(
     if errors:
         logger.warning(f"picker task {task_id}: assemble_order failed for {errors}")
 
+    # Создаём задания на печать (дедупликация по (waybill_job_id, filename))
+    pdf_filenames: list[str] = []
+    if task.waybill_job_id:
+        import json as _json
+        job = db.get(models.Job, task.waybill_job_id)
+        if job and job.pdf_files_json:
+            try:
+                files = _json.loads(job.pdf_files_json)
+                pdf_filenames = [
+                    f["filename"] if isinstance(f, dict) else str(f)
+                    for f in files
+                ]
+                # Создаём print job для каждого PDF (один раз на файл)
+                for fname in pdf_filenames:
+                    already = db.query(models.PickerPrintJob).filter(
+                        models.PickerPrintJob.waybill_job_id == task.waybill_job_id,
+                        models.PickerPrintJob.filename == fname,
+                    ).first()
+                    if not already:
+                        db.add(models.PickerPrintJob(
+                            city=task.city,
+                            waybill_job_id=task.waybill_job_id,
+                            filename=fname,
+                            picker_task_id=task_id,
+                        ))
+                db.commit()
+            except Exception:
+                pass
+
     return {
         "task_id": task_id,
         "status": "done",
@@ -631,6 +697,8 @@ def complete_task(
         "skipped": len([s for s in scans if s.match_status == "skipped"]),
         "assembled_in_kaspi": assembled_count,
         "assemble_errors": errors,
+        "waybill_job_id": task.waybill_job_id,
+        "pdf_filenames": pdf_filenames,
     }
 
 
@@ -655,6 +723,164 @@ def release_task(
         db.delete(s)
     db.commit()
     return {"released": True}
+
+
+# ─── Session endpoints ────────────────────────────────────────────────────────
+
+@router.post("/sessions/start")
+def start_session(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Начать рабочую сессию. Pending-задачи сразу разбрасываются round-robin."""
+    username = user.get("username")
+    city = user.get("city", "almaty")
+
+    existing = db.query(models.PickerSession).filter(
+        models.PickerSession.username == username,
+        models.PickerSession.status == "active",
+    ).first()
+    if existing:
+        assigned = _redistribute_tasks(city, db)
+        return {"session_id": existing.id, "assigned": assigned, "already_active": True}
+
+    sess = models.PickerSession(username=username, city=city)
+    db.add(sess)
+    db.commit()
+    assigned = _redistribute_tasks(city, db)
+    return {"session_id": sess.id, "assigned": assigned}
+
+
+@router.post("/sessions/end")
+def end_session(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Завершить сессию. Незапущенные задания возвращаются в очередь и перераспределяются."""
+    username = user.get("username")
+    sess = db.query(models.PickerSession).filter(
+        models.PickerSession.username == username,
+        models.PickerSession.status == "active",
+    ).first()
+    if not sess:
+        raise HTTPException(404, "Активной сессии нет")
+
+    sess.status = "ended"
+    sess.ended_at = datetime.now(timezone.utc)
+    city = sess.city
+
+    # Возвращаем только незапущенные задачи (scanned_qty == 0)
+    uncompleted = db.query(models.PickerTask).filter(
+        models.PickerTask.picker_username == username,
+        models.PickerTask.status == "claimed",
+        models.PickerTask.scanned_qty == 0,
+        models.PickerTask.city == city,
+    ).all()
+    released = 0
+    for t in uncompleted:
+        t.status = "pending"
+        t.picker_username = None
+        t.claimed_at = None
+        released += 1
+
+    db.commit()
+    _redistribute_tasks(city, db)
+    return {"ended": True, "released_tasks": released}
+
+
+@router.get("/sessions/me")
+def my_session(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Статус текущей сессии + список назначенных задач."""
+    username = user.get("username")
+    city = user.get("city", "almaty")
+
+    sess = db.query(models.PickerSession).filter(
+        models.PickerSession.username == username,
+        models.PickerSession.status == "active",
+    ).first()
+
+    active_count = len(_active_sessions(city, db))
+
+    if not sess:
+        return {
+            "in_session": False,
+            "session": None,
+            "tasks": [],
+            "active_sessions_count": active_count,
+        }
+
+    # Подбросить любые новые pending-задачи
+    _redistribute_tasks(city, db)
+
+    tasks = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.picker_username == username,
+            models.PickerTask.status == "claimed",
+        )
+        .order_by(models.PickerTask.id)
+        .all()
+    )
+
+    return {
+        "in_session": True,
+        "session": {
+            "id": sess.id,
+            "started_at": sess.started_at.isoformat() if sess.started_at else None,
+        },
+        "tasks": [_task_dict(t) for t in tasks],
+        "active_sessions_count": active_count,
+    }
+
+
+@router.get("/print-queue")
+def get_print_queue(
+    city: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Pending print jobs для принт-станции (опрашивается каждые 5 сек)."""
+    jobs = (
+        db.query(models.PickerPrintJob)
+        .filter(
+            models.PickerPrintJob.city == city,
+            models.PickerPrintJob.status == "pending",
+        )
+        .order_by(models.PickerPrintJob.created_at)
+        .limit(20)
+        .all()
+    )
+    return [
+        {
+            "id": j.id,
+            "waybill_job_id": j.waybill_job_id,
+            "filename": j.filename,
+            "picker_task_id": j.picker_task_id,
+            "status": j.status,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+        }
+        for j in jobs
+    ]
+
+
+@router.post("/print-jobs/{job_id}/done")
+def mark_print_job_done(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Принт-станция отмечает задание как выполненное."""
+    j = db.get(models.PickerPrintJob, job_id)
+    if not j:
+        raise HTTPException(404, "Задание не найдено")
+    j.status = "done"
+    j.printed_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"done": True}
 
 
 @router.get("/lookup/barcode/{barcode}")

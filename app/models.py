@@ -182,6 +182,32 @@ class PickerTask(Base):
     scans = relationship("PickerScan", back_populates="task", cascade="all, delete-orphan")
 
 
+class PickerPrintJob(Base):
+    """Задание на печать накладной. Создаётся при завершении picker-задачи, выполняется принт-станцией."""
+    __tablename__ = "picker_print_jobs"
+
+    id = Column(Integer, primary_key=True)
+    city = Column(String, nullable=False, index=True)
+    waybill_job_id = Column(Integer, nullable=False)
+    filename = Column(String, nullable=False)
+    picker_task_id = Column(Integer, nullable=True)
+    status = Column(String, default="pending", index=True)  # pending | done
+    created_at = Column(DateTime, default=now)
+    printed_at = Column(DateTime, nullable=True)
+
+
+class PickerSession(Base):
+    """Рабочая сессия сборщика. Активные сессии определяют round-robin раздачу заданий."""
+    __tablename__ = "picker_sessions"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String, nullable=False, index=True)
+    city = Column(String, nullable=False, index=True)
+    started_at = Column(DateTime, default=now)
+    ended_at = Column(DateTime, nullable=True)
+    status = Column(String, default="active")  # active | ended
+
+
 class PickerScan(Base):
     """Событие скана: сборщик отсканировал штрихкод для конкретного заказа."""
     __tablename__ = "picker_scans"

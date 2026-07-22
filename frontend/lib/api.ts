@@ -269,6 +269,15 @@ export interface PickerTask {
   waybill_job_id: number | null;
 }
 
+export interface PrintJob {
+  id: number;
+  waybill_job_id: number;
+  filename: string;
+  picker_task_id: number | null;
+  status: string;
+  created_at: string;
+}
+
 export interface PickerSessionInfo {
   id: number;
   started_at: string;
@@ -335,6 +344,11 @@ export const picker = {
 
   lookupBarcode: (barcode: string) =>
     req<BarcodeLookup>(`/picker/lookup/barcode/${encodeURIComponent(barcode)}`),
+
+  printQueue: (city: string) => req<PrintJob[]>(`/picker/print-queue?city=${city}`),
+
+  printJobDone: (jobId: number) =>
+    req<{ done: boolean }>(`/picker/print-jobs/${jobId}/done`, { method: "POST" }),
 
   mySession: () => req<MySessionResponse>("/picker/sessions/me"),
 

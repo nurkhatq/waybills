@@ -469,3 +469,36 @@ def generate_pdf_job(self, job_id):
             _update_status(db, job, "error", f"{type(e).__name__}: {e}\n{traceback.format_exc()[:2000]}")
     finally:
         db.close()
+
+
+@celery.task(name="tasks.auto_close_picker_sessions")
+def auto_close_picker_sessions():
+    """Автоматически завершить все активные сессии сборщиков в 20:00 KZ."""
+    db = SessionLocal()
+    try:
+        sessions = db.query(models.PickerSession).filter(
+            models.PickerSession.status == "active"
+        ).all()
+        closed = 0
+        for sess in sessions:
+            sess.status = "ended"
+            sess.ended_at = datetime.datetime.now(datetime.timezone.utc)
+            # Незапущенные задачи (scanned_qty == 0) возвращаем в очередь
+            uncompleted = db.query(models.PickerTask).filter(
+                models.PickerTask.picker_username == sess.username,
+                models.PickerTask.status == "claimed",
+                models.PickerTask.scanned_qty == 0,
+                models.PickerTask.city == sess.city,
+            ).all()
+            for t in uncompleted:
+                t.status = "pending"
+                t.picker_username = None
+                t.claimed_at = None
+            closed += 1
+        db.commit()
+        logger.info(f"auto_close_picker_sessions: закрыто {closed} сессий")
+        return {"closed": closed}
+    except Exception as e:
+        logger.error(f"auto_close_picker_sessions error: {e}")
+    finally:
+        db.close()
