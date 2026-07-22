@@ -133,34 +133,40 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
   return (
     <div className="space-y-2">
-      <div className="relative bg-black rounded-xl overflow-hidden" style={{ aspectRatio: "4/3" }}>
+      <div className="relative bg-black rounded-xl overflow-hidden" style={{ height: "65vw", maxHeight: "420px", minHeight: "260px" }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center text-white text-sm z-10">
             Загрузка камеры…
           </div>
         )}
         <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
-        {/* Прицел */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div
-            className="border-2 border-green-400 rounded"
-            style={{ width: "70%", height: "25%", boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)" }}
-          />
-        </div>
+        {/* Угловые маркеры — вся площадь сканируется */}
+        {!loading && (
+          <div className="absolute inset-0 pointer-events-none p-4">
+            {/* Верх-лево */}
+            <div className="absolute top-4 left-4 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl" />
+            {/* Верх-право */}
+            <div className="absolute top-4 right-4 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr" />
+            {/* Низ-лево */}
+            <div className="absolute bottom-4 left-4 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl" />
+            {/* Низ-право */}
+            <div className="absolute bottom-4 right-4 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br" />
+          </div>
+        )}
         {!active && (
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm z-20">
             Пауза…
           </div>
         )}
-        {/* Кнопка фонарика поверх камеры */}
+        {/* Кнопка фонарика */}
         {torchSupported && !loading && (
           <button
             onClick={toggleTorch}
-            className={`absolute top-3 right-3 z-20 rounded-full w-10 h-10 flex items-center justify-center text-xl shadow-lg transition-colors ${
+            className={`absolute top-3 right-3 z-20 rounded-full w-11 h-11 flex items-center justify-center text-xl shadow-lg transition-colors ${
               torchOn ? "bg-yellow-400 text-black" : "bg-black/60 text-white"
             }`}
           >
-            {torchOn ? "🔦" : "🔦"}
+            🔦
           </button>
         )}
       </div>
