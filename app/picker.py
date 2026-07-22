@@ -149,9 +149,15 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     batch: list = []
     for brand, sku, o, entries in type_b_items:
         info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
-        first_entry = entries[0] if entries else {}
-        name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
-        offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
+        if o.num_positions > 1:
+            # Мультипозиционный заказ: показываем все позиции через " + "
+            names = [(e.get("offer") or {}).get("name", "") for e in entries if (e.get("offer") or {}).get("name")]
+            name = " + ".join(names) if names else sku
+            offer_code = (entries[0].get("offer") or {}).get("code", "") or sku
+        else:
+            first_entry = entries[0] if entries else {}
+            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", sku)
+            offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
         batch.append({
             "order_code": o.order_code,
             "kaspi_order_id": None,
