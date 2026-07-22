@@ -88,7 +88,8 @@ export default function PickerTaskPage() {
     setScannerActive(false);
     setProcessing(true);
 
-    const expected = currentOrder.expected_barcode;
+    // Для типа A штрихкод хранится на уровне task, для B — в order item
+    const expected = currentOrder.expected_barcode ?? task.expected_barcode;
     const isKit = (currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit;
 
     let status: ScanStatus = "matched";
@@ -287,10 +288,11 @@ export default function PickerTaskPage() {
             <p className="text-xs font-semibold text-blue-500 mb-1">СЕЙЧАС ИЩЕМ</p>
             <p className="font-semibold text-gray-900 text-sm leading-tight">{currentOrder.name}</p>
             <p className="text-xs text-gray-400 mt-0.5">{currentOrder.order_code}</p>
-            {currentOrder.expected_barcode && (
-              <p className="text-xs text-gray-400">ШК: {currentOrder.expected_barcode}</p>
+            {/* Для типа A штрихкод хранится на уровне task, для B — в каждом order item */}
+            {(currentOrder.expected_barcode || task.expected_barcode) && (
+              <p className="text-xs text-gray-400">ШК: {currentOrder.expected_barcode ?? task.expected_barcode}</p>
             )}
-            {!(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && !currentOrder.expected_barcode && (
+            {!(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && !currentOrder.expected_barcode && !task.expected_barcode && (
               <p className="text-xs text-orange-500">Штрихкод не задан в системе</p>
             )}
             {(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && (

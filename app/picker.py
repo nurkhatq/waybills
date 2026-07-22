@@ -124,6 +124,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
         ords = groups[sku]
         info = inv.product_info(sku) if sku else {"name": sku, "barcode": None, "is_kit": False}
         is_kit = info.get("is_kit", False)
+        expected_bc = info.get("barcode")
         task_orders = [
             {
                 "order_code": o.code,
@@ -131,6 +132,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
                 "offer_code": o.offer_code or sku,
                 "name": o.name or info.get("name", sku),
                 "quantity": o.quantity,
+                "expected_barcode": expected_bc,
                 "is_kit": is_kit,
             }
             for o in ords
