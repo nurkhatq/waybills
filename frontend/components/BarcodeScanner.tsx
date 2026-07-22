@@ -34,16 +34,16 @@ export default function BarcodeScanner({ onScan, active = true, pauseMs = 1500 }
 
     async function start() {
       try {
-        const { BrowserMultiFormatReader, DecodeHintType } = await import("@zxing/browser" as never) as never as {
+        const { BrowserMultiFormatReader } = await import("@zxing/browser" as never) as never as {
           BrowserMultiFormatReader: new (hints?: Map<number, unknown>, interval?: number) => {
             decodeFromConstraints: (c: MediaStreamConstraints, v: HTMLVideoElement, cb: (r: unknown, e: unknown) => void) => Promise<void>;
             reset: () => void;
           };
-          DecodeHintType: { TRY_HARDER: number };
         };
 
+        // DecodeHintType.TRY_HARDER = 3 (из @zxing/library, не реэкспортируется в @zxing/browser)
         const hints = new Map<number, unknown>();
-        hints.set(DecodeHintType.TRY_HARDER, true);
+        hints.set(3, true);
 
         // 100мс между попытками вместо дефолтных 500мс
         const reader = new BrowserMultiFormatReader(hints, 100);
