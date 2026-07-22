@@ -98,7 +98,7 @@ def fetch_ready_orders(city: str, days_back: int = 7, progress_cb=None) -> Dict:
             plan_ts = kd.get("courierTransmissionPlanningDate")
             if plan_ts is not None:
                 plan_date = datetime.datetime.fromtimestamp(plan_ts / 1000, tz=TZ_KZ).date()
-                if plan_date != today_kz:
+                if plan_date > today_kz:
                     stats["filtered_transmitted"] += 1
                     continue
 
