@@ -9,9 +9,11 @@
 - Остальные → тип B (пачки по BATCH_SIZE заказов, смешанные SKU)
 - Сортировка типа B по бренду (латиница → кириллица)
 - Сборщик берёт задание из очереди (claim), сканирует, подтверждает
+- При complete → вызываем assemble_order в Kaspi (assembled=True)
 """
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from .auth import get_current_user
 from .db import get_db
-from . import models
+from . import models, kaspi
 from .inventory import get_inventory
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,12 @@ class ScanBody(BaseModel):
     order_code: str
     barcode: str | None = None       # None = кнопка "нет штрихкода"
     match_status: str = "matched"    # matched | unknown_barcode | no_barcode | skipped
+
+
+class BulkScanBody(BaseModel):
+    """Быстрый режим типа A: один скан + количество."""
+    barcode: str | None = None
+    quantity: int = 1               # сколько заказов подтвердить
 
 
 # ─── Queue builder ────────────────────────────────────────────────────────────
@@ -71,7 +79,6 @@ def build_picker_tasks(city: str, db: Session) -> int:
     if existing > 0:
         return 0
 
-    # Берём последний готовый AssemblyJob
     aj = (
         db.query(models.AssemblyJob)
         .filter(models.AssemblyJob.city == city, models.AssemblyJob.status == "ready")
@@ -91,12 +98,11 @@ def build_picker_tasks(city: str, db: Session) -> int:
 
     inv = get_inventory()
 
-    # Группируем по offer_code
-    from collections import defaultdict
+    # Группируем по resolved main_sku
     groups: dict[str, list] = defaultdict(list)
     for o in orders:
-        sku = o.offer_code or ""
-        main_sku = inv.resolve(sku) if sku else sku
+        raw_sku = o.offer_code or ""
+        main_sku = inv.resolve(raw_sku) if raw_sku else raw_sku
         groups[main_sku].append(o)
 
     # Тип A: SKU с 5+ заказами
@@ -114,10 +120,10 @@ def build_picker_tasks(city: str, db: Session) -> int:
 
     created = 0
 
-    # Создаём задачи типа A
     for sku in type_a_skus:
         ords = groups[sku]
-        info = inv.product_info(sku) if sku else {"name": sku, "barcode": None}
+        info = inv.product_info(sku) if sku else {"name": sku, "barcode": None, "is_kit": False}
+        is_kit = info.get("is_kit", False)
         task_orders = [
             {
                 "order_code": o.code,
@@ -125,6 +131,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
                 "offer_code": o.offer_code or sku,
                 "name": o.name or info.get("name", sku),
                 "quantity": o.quantity,
+                "is_kit": is_kit,
             }
             for o in ords
         ]
@@ -140,10 +147,11 @@ def build_picker_tasks(city: str, db: Session) -> int:
         ))
         created += 1
 
-    # Создаём задачи типа B (пачки по BATCH_SIZE)
+    # Тип B (пачки по BATCH_SIZE)
     batch: list = []
     for brand, sku, o in type_b_items:
-        info = inv.product_info(sku) if sku else {"name": o.name or sku, "barcode": None}
+        info = inv.product_info(sku) if sku else {"name": o.name or sku, "barcode": None, "is_kit": False}
+        is_kit = info.get("is_kit", False)
         batch.append({
             "order_code": o.code,
             "kaspi_order_id": o.kaspi_order_id,
@@ -151,6 +159,7 @@ def build_picker_tasks(city: str, db: Session) -> int:
             "name": o.name or info.get("name", sku),
             "quantity": o.quantity,
             "expected_barcode": info.get("barcode"),
+            "is_kit": is_kit,
         })
         if len(batch) >= BATCH_SIZE:
             db.add(models.PickerTask(
@@ -178,15 +187,46 @@ def build_picker_tasks(city: str, db: Session) -> int:
     return created
 
 
-# ─── Serializers ──────────────────────────────────────────────────────────────
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _resolve_scan_status(barcode: str | None, order: dict, inv) -> str:
+    """Определяет match_status по отсканированному штрихкоду и заказу."""
+    if barcode is None:
+        return "no_barcode"
+
+    expected_barcode = order.get("expected_barcode") or order.get("barcode")
+    is_kit = order.get("is_kit", False)
+
+    # Ищем в инвентаре
+    found_sku = inv.lookup_barcode(barcode)  # всегда возвращает resolved main_sku
+
+    # Комплекты: скан любого известного товара принимается
+    # (компоненты комплекта — отдельные SKU)
+    if is_kit:
+        if found_sku:
+            return "matched"
+        # штрихкод неизвестен системе — записываем как unknown для дальнейшего добавления
+        return "unknown_barcode"
+
+    if found_sku is None:
+        return "unknown_barcode"
+
+    # Сравниваем с ожидаемым SKU заказа
+    expected_sku = order.get("offer_code", "")
+    main_expected = inv.resolve(expected_sku) if expected_sku else None
+
+    if main_expected and found_sku == main_expected:
+        return "matched"
+
+    # Штрихкод известен, но не совпадает с ожидаемым
+    return "unknown_barcode"
+
 
 def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
     orders = json.loads(task.orders_json or "[]")
-    scanned_codes = set()
     scan_map = {}
     if include_scans:
         for s in (task.scans or []):
-            scanned_codes.add(s.order_code)
             scan_map[s.order_code] = {
                 "barcode_scanned": s.barcode_scanned,
                 "match_status": s.match_status,
@@ -211,6 +251,10 @@ def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
         "claimed_at": task.claimed_at.isoformat() if task.claimed_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
+
+
+def _count_scanned(task: models.PickerTask) -> int:
+    return len([s for s in task.scans if s.match_status != "skipped"])
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -242,7 +286,6 @@ def list_tasks(
     city = user.get("city", "almaty")
     username = user.get("username")
 
-    # Авто-строим задачи если очередь пуста
     pending_count = db.query(models.PickerTask).filter(
         models.PickerTask.city == city,
         models.PickerTask.status == "pending",
@@ -275,11 +318,9 @@ def claim_task(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Сборщик берёт задание себе."""
     username = user.get("username")
     city = user.get("city", "almaty")
 
-    # Нельзя взять 2 задания одновременно
     active = db.query(models.PickerTask).filter(
         models.PickerTask.city == city,
         models.PickerTask.picker_username == username,
@@ -325,7 +366,7 @@ def record_scan(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Записать результат скана одного заказа."""
+    """Записать скан одного заказа."""
     task = db.get(models.PickerTask, task_id)
     if not task:
         raise HTTPException(404, "Задание не найдено")
@@ -334,44 +375,91 @@ def record_scan(
     if task.status != "claimed":
         raise HTTPException(400, "Задание не активно")
 
-    # Проверяем, не сканировали ли уже этот заказ
+    orders_list = json.loads(task.orders_json or "[]")
+    order_item = next((o for o in orders_list if o["order_code"] == body.order_code), None)
+
     existing = next((s for s in task.scans if s.order_code == body.order_code), None)
+
+    if body.match_status != "matched":
+        # Клиент передал явный статус (no_barcode, skipped и пр.) — доверяем
+        status = body.match_status
+    elif body.barcode is None:
+        status = "no_barcode"
+    else:
+        # Авто-определение
+        inv = get_inventory()
+        if order_item:
+            status = _resolve_scan_status(body.barcode, order_item, inv)
+        else:
+            found = inv.lookup_barcode(body.barcode)
+            status = "matched" if found else "unknown_barcode"
+
     if existing:
-        # Обновляем если пришёл повторный скан
         existing.barcode_scanned = body.barcode
-        existing.match_status = body.match_status
+        existing.match_status = status
         existing.scanned_at = datetime.now(timezone.utc)
     else:
-        # Определяем match_status если не указан явно
-        status = body.match_status
-        if body.barcode and status == "matched":
-            inv = get_inventory()
-            found_sku = inv.lookup_barcode(body.barcode)
-            # Ищем ожидаемый SKU для этого заказа
-            orders_list = json.loads(task.orders_json or "[]")
-            expected_sku = next(
-                (o.get("offer_code") for o in orders_list if o["order_code"] == body.order_code),
-                None,
-            )
-            if found_sku is None and body.barcode:
-                status = "unknown_barcode"
-            elif found_sku and expected_sku:
-                main_expected = inv.resolve(expected_sku)
-                status = "matched" if found_sku == main_expected else "unknown_barcode"
-
         db.add(models.PickerScan(
             task_id=task_id,
             order_code=body.order_code,
-            offer_code=next(
-                (o.get("offer_code") for o in json.loads(task.orders_json or "[]")
-                 if o["order_code"] == body.order_code),
-                None,
-            ),
+            offer_code=order_item.get("offer_code") if order_item else None,
             barcode_scanned=body.barcode,
             match_status=status,
         ))
 
-    task.scanned_qty = len([s for s in task.scans if s.match_status != "skipped"]) + (1 if not existing else 0)
+    db.flush()
+    task.scanned_qty = _count_scanned(task)
+    db.commit()
+    db.refresh(task)
+    return _task_dict(task, include_scans=True)
+
+
+@router.post("/tasks/{task_id}/bulk-scan")
+def bulk_scan(
+    task_id: int,
+    body: BulkScanBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Быстрый режим для типа A: один скан + количество.
+    Подтверждает `quantity` заказов подряд начиная с первого неотсканированного.
+    """
+    task = db.get(models.PickerTask, task_id)
+    if not task:
+        raise HTTPException(404, "Задание не найдено")
+    if task.picker_username != user.get("username"):
+        raise HTTPException(403, "Это задание взял другой сборщик")
+    if task.status != "claimed":
+        raise HTTPException(400, "Задание не активно")
+
+    orders_list = json.loads(task.orders_json or "[]")
+    scanned_codes = {s.order_code for s in task.scans}
+    pending_orders = [o for o in orders_list if o["order_code"] not in scanned_codes]
+
+    inv = get_inventory()
+    qty = min(body.quantity, len(pending_orders))
+    if qty <= 0:
+        raise HTTPException(400, "Нет заказов для подтверждения")
+
+    # Определяем статус по первому незаполненному заказу
+    sample_order = pending_orders[0] if pending_orders else {}
+    if body.barcode is None:
+        status = "no_barcode"
+    else:
+        status = _resolve_scan_status(body.barcode, sample_order, inv)
+
+    for o in pending_orders[:qty]:
+        db.add(models.PickerScan(
+            task_id=task_id,
+            order_code=o["order_code"],
+            offer_code=o.get("offer_code"),
+            barcode_scanned=body.barcode,
+            match_status=status,
+        ))
+
+    db.flush()
+    task.scanned_qty = _count_scanned(task)
     db.commit()
     db.refresh(task)
     return _task_dict(task, include_scans=True)
@@ -383,7 +471,7 @@ def complete_task(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Сборщик завершил задание."""
+    """Сборщик завершил задание. Вызываем assemble_order для каждого заказа в Kaspi."""
     task = db.get(models.PickerTask, task_id)
     if not task:
         raise HTTPException(404, "Задание не найдено")
@@ -396,8 +484,27 @@ def complete_task(
     task.completed_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Статистика по сканам
     scans = task.scans
+    orders_list = json.loads(task.orders_json or "[]")
+
+    # Отправляем assemble_order в Kaspi только для успешно отсканированных
+    scanned_codes = {
+        s.order_code for s in scans
+        if s.match_status in ("matched", "unknown_barcode", "no_barcode")
+    }
+    assembled_count = 0
+    errors = []
+    for o in orders_list:
+        if o["order_code"] in scanned_codes:
+            ok = kaspi.assemble_order(o["kaspi_order_id"], o["order_code"])
+            if ok:
+                assembled_count += 1
+            else:
+                errors.append(o["order_code"])
+
+    if errors:
+        logger.warning(f"picker task {task_id}: assemble_order failed for {errors}")
+
     return {
         "task_id": task_id,
         "status": "done",
@@ -405,6 +512,8 @@ def complete_task(
         "scanned": len([s for s in scans if s.match_status in ("matched", "unknown_barcode")]),
         "no_barcode": len([s for s in scans if s.match_status == "no_barcode"]),
         "skipped": len([s for s in scans if s.match_status == "skipped"]),
+        "assembled_in_kaspi": assembled_count,
+        "assemble_errors": errors,
     }
 
 
@@ -414,7 +523,7 @@ def release_task(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Вернуть задание в очередь (сборщик вышел/отказался)."""
+    """Вернуть задание в очередь."""
     task = db.get(models.PickerTask, task_id)
     if not task:
         raise HTTPException(404, "Задание не найдено")
@@ -425,7 +534,6 @@ def release_task(
     task.picker_username = None
     task.claimed_at = None
     task.scanned_qty = 0
-    # Удаляем частичные сканы
     for s in list(task.scans):
         db.delete(s)
     db.commit()
@@ -437,9 +545,9 @@ def lookup_barcode(
     barcode: str,
     user: dict = Depends(get_current_user),
 ):
-    """Найти товар по штрихкоду."""
+    """Найти товар по штрихкоду. dop_sku автоматически разрешается до main_sku."""
     inv = get_inventory()
-    main_sku = inv.lookup_barcode(barcode)
+    main_sku = inv.lookup_barcode(barcode)  # уже resolved
     if not main_sku:
         return {"found": False, "barcode": barcode}
     return {"found": True, "barcode": barcode, **inv.product_info(main_sku)}

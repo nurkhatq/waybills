@@ -132,8 +132,12 @@ class Inventory:
         return self._main_to_barcode.get(main_sku)
 
     def lookup_barcode(self, barcode: str) -> Optional[str]:
-        """Возвращает main_sku по штрихкоду, или None если не найден."""
-        return self._barcode_to_main.get(barcode)
+        """Возвращает main_sku по штрихкоду, или None если не найден.
+        Дубли (dop_sku) автоматически разрешаются до родительского main_sku."""
+        raw = self._barcode_to_main.get(barcode)
+        if raw is None:
+            return None
+        return self._sku_to_main.get(raw, raw)
 
     def brand(self, main_sku: str) -> str:
         return self._main_to_brand.get(main_sku, "")

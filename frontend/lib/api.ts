@@ -305,6 +305,12 @@ export const picker = {
       body: JSON.stringify(body),
     }),
 
+  bulkScan: (taskId: number, body: { barcode?: string | null; quantity: number }) =>
+    req<PickerTask>(`/picker/tasks/${taskId}/bulk-scan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   complete: (taskId: number) =>
     req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number }>(
       `/picker/tasks/${taskId}/complete`,
