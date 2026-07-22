@@ -26,24 +26,38 @@ class Inventory:
         try:
             with open(csv_path, encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames or []
+                # Новый формат определяем по наличию master_sku вместо is_dop_of
+                new_format = "master_sku" in fieldnames
+                dop_sep = "," if new_format else "|"
+
                 for row in reader:
                     main = row.get("main_sku", "").strip().strip(",")
                     if not main:
                         continue
-                    name = row.get("ms_name", "") or row.get("kaspi_title", "") or main
-                    is_dop = (row.get("is_dop_of", "") or "").strip() == "да"
+
+                    if new_format:
+                        master_sku = (row.get("master_sku", "") or "").strip()
+                        product_id = main.split("_")[0]
+                        is_dop = bool(master_sku) and product_id != master_sku
+                        name = (row.get("name", "") or "").strip() or main
+                        type_val = (row.get("type", "") or "").strip()
+                    else:
+                        is_dop = (row.get("is_dop_of", "") or "").strip() == "да"
+                        name = row.get("ms_name", "") or row.get("kaspi_title", "") or main
+                        type_val = (row.get("ms_type", "") or "").strip()
+
                     # дубли — всегда non-kit: они дубли Товара и собираются как тот же Товар
-                    is_kit = False if is_dop else (row.get("ms_type", "") or "").strip() == "Комплект"
-                    # дубли (is_dop_of=да) не самомаппируем — иначе перезапишут
-                    # маппинг dop→parent, выставленный при обработке родительской строки
+                    is_kit = False if is_dop else type_val == "Комплект"
+                    # дубли не самомаппируем — иначе перезапишут маппинг dop→parent
                     if not is_dop:
                         self._sku_to_main[main] = main
                     # тип товара сохраняем всегда (нужен для is_kit_for_offer)
                     self._main_info[main] = (name, is_kit)
 
-                    dop_raw = row.get("dop_skus", "")
+                    dop_raw = (row.get("dop_skus", "") or "").strip()
                     if dop_raw:
-                        for dop in dop_raw.split("|"):
+                        for dop in dop_raw.split(dop_sep):
                             dop = dop.strip()
                             if dop:
                                 self._sku_to_main[dop] = main
