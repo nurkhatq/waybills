@@ -219,6 +219,12 @@ export default function Dashboard() {
               {t === "create" ? "Сборка" : t === "history" ? `История${jobs.length ? ` (${jobs.length})` : ""}` : "Склад"}
             </button>
           ))}
+          <button
+            onClick={() => router.push("/picker")}
+            className="px-4 py-1.5 text-sm font-semibold rounded-lg transition-all duration-200 text-gray-500 hover:text-gray-700"
+          >
+            Сборщик
+          </button>
         </div>
 
         {/* Create tab */}

@@ -17,6 +17,7 @@ from .auth import get_current_user, login_via_wms
 from .config import settings
 from .db import get_db, init_db
 from .inventory import load_inventory
+from .picker import router as picker_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -675,6 +676,9 @@ def agent_complete_task(
         job.status = "done"
         db.commit()
     return {"ok": True}
+
+
+app.include_router(picker_router)
 
 
 @app.get("/health")

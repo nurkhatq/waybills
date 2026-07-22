@@ -143,3 +143,56 @@ class AssemblyOrder(Base):
     transmitted_ok = Column(Boolean, nullable=True)
 
     job = relationship("AssemblyJob", back_populates="orders")
+
+
+class PickerTask(Base):
+    """Пачка заказов, выданная одному сборщику. Pull-модель: сборщик берёт сам."""
+    __tablename__ = "picker_tasks"
+
+    id = Column(Integer, primary_key=True)
+    city = Column(String, nullable=False, index=True)
+    # Тип: A — массовый (5+ заказов на SKU), B — пачка одиночных
+    task_type = Column(String, nullable=False, default="B")
+    # SKU товара (для типа A — один SKU; для типа B — несколько)
+    offer_code = Column(String, nullable=True)
+    product_name = Column(String, nullable=True)
+    # Ожидаемый штрихкод товара (может быть null если нет в инвентаре)
+    expected_barcode = Column(String, nullable=True)
+    # JSON-список заказов: [{order_code, kaspi_order_id, offer_code, name, quantity}]
+    orders_json = Column(Text, nullable=False, default="[]")
+    total_orders = Column(Integer, default=0)
+    total_qty = Column(Integer, default=0)
+
+    # Сборщик
+    picker_username = Column(String, nullable=True, index=True)
+    status = Column(String, default="pending", index=True)
+    # pending | claimed | done
+
+    # Прогресс
+    scanned_qty = Column(Integer, default=0)
+
+    created_at = Column(DateTime, default=now, index=True)
+    claimed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    scans = relationship("PickerScan", back_populates="task", cascade="all, delete-orphan")
+
+
+class PickerScan(Base):
+    """Событие скана: сборщик отсканировал штрихкод для конкретного заказа."""
+    __tablename__ = "picker_scans"
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("picker_tasks.id"), nullable=False, index=True)
+    order_code = Column(String, nullable=False)
+    offer_code = Column(String, nullable=True)
+    # Что реально отсканировали
+    barcode_scanned = Column(String, nullable=True)
+    # matched — штрихкод совпал с ожидаемым
+    # unknown_barcode — в системе нет штрихкода, записали на будущее
+    # no_barcode — у товара нет штрихкода ни в системе ни физически
+    # skipped — пропущен сборщиком
+    match_status = Column(String, nullable=False, default="matched")
+    scanned_at = Column(DateTime, default=now)
+
+    task = relationship("PickerTask", back_populates="scans")

@@ -234,6 +234,90 @@ export const api = {
   },
 };
 
+// ── Picker types ──────────────────────────────────────────────────────────────
+
+export interface PickerOrderItem {
+  order_code: string;
+  kaspi_order_id: string;
+  offer_code: string;
+  name: string;
+  quantity: number;
+  expected_barcode?: string | null;
+  scan?: {
+    barcode_scanned: string | null;
+    match_status: string;
+    scanned_at: string;
+  } | null;
+}
+
+export interface PickerTask {
+  id: number;
+  city: string;
+  task_type: "A" | "B";
+  offer_code: string | null;
+  product_name: string | null;
+  expected_barcode: string | null;
+  orders: PickerOrderItem[];
+  total_orders: number;
+  total_qty: number;
+  scanned_qty: number;
+  picker_username: string | null;
+  status: "pending" | "claimed" | "done";
+  created_at: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
+}
+
+export interface PickerTasksResponse {
+  tasks: PickerTask[];
+  my_task: PickerTask | null;
+}
+
+export interface BarcodeLookup {
+  found: boolean;
+  barcode: string;
+  main_sku?: string;
+  name?: string;
+  barcode_from_db?: string;
+  brand?: string;
+}
+
+// ── Picker API calls ───────────────────────────────────────────────────────────
+
+export const picker = {
+  tasks: () => req<PickerTasksResponse>("/picker/tasks"),
+
+  build: (city?: string) =>
+    req<{ created: number; pending_tasks: number }>(
+      `/picker/build${city ? `?city=${city}` : ""}`,
+      { method: "POST" }
+    ),
+
+  claim: (taskId: number) =>
+    req<PickerTask>(`/picker/tasks/${taskId}/claim`, { method: "POST" }),
+
+  getTask: (taskId: number) =>
+    req<PickerTask>(`/picker/tasks/${taskId}`),
+
+  scan: (taskId: number, body: { order_code: string; barcode?: string | null; match_status?: string }) =>
+    req<PickerTask>(`/picker/tasks/${taskId}/scan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  complete: (taskId: number) =>
+    req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number }>(
+      `/picker/tasks/${taskId}/complete`,
+      { method: "POST" }
+    ),
+
+  release: (taskId: number) =>
+    req<{ released: boolean }>(`/picker/tasks/${taskId}/release`, { method: "POST" }),
+
+  lookupBarcode: (barcode: string) =>
+    req<BarcodeLookup>(`/picker/lookup/barcode/${encodeURIComponent(barcode)}`),
+};
+
 export function saveSession(token: string, user: User) {
   localStorage.setItem("wb_token", token);
   localStorage.setItem("wb_user", JSON.stringify(user));

@@ -17,6 +17,12 @@ class Inventory:
         self._sku_to_main: Dict[str, str] = {}
         # main_sku → (display_name, is_kit)
         self._main_info: Dict[str, Tuple[str, bool]] = {}
+        # barcode → main_sku (для поиска товара по штрихкоду)
+        self._barcode_to_main: Dict[str, str] = {}
+        # main_sku → barcode (первый/основной)
+        self._main_to_barcode: Dict[str, str] = {}
+        # main_sku → brand
+        self._main_to_brand: Dict[str, str] = {}
 
     def load(self, csv_path: str):
         if not os.path.exists(csv_path):
@@ -70,6 +76,23 @@ class Inventory:
                             dop = dop.strip()
                             if dop:
                                 self._sku_to_main[dop] = main
+
+                    # Штрихкоды
+                    brand = (row.get("brand", "") or "").strip()
+                    if brand and not is_dop:
+                        self._main_to_brand[main] = brand
+
+                    bc_primary = (row.get("barcode", "") or "").strip()
+                    bc_all_raw = (row.get("barcodes", "") or "").strip()
+                    bc_all = [b.strip() for b in bc_all_raw.split(",") if b.strip()] if bc_all_raw else []
+                    if bc_primary and bc_primary not in bc_all:
+                        bc_all.insert(0, bc_primary)
+                    for bc in bc_all:
+                        if bc:
+                            self._barcode_to_main[bc] = main
+                    if bc_all and not is_dop:
+                        self._main_to_barcode[main] = bc_all[0]
+
                     count += 1
             logger.info(f"Inventory loaded: {count} products, {len(self._sku_to_main)} SKU mappings")
         except Exception as e:
@@ -103,6 +126,28 @@ class Inventory:
         """Название товара по main_sku."""
         info = self._main_info.get(main_sku)
         return info[0] if info else main_sku
+
+    def barcode_for_sku(self, main_sku: str) -> Optional[str]:
+        """Возвращает основной штрихкод для SKU, или None если нет."""
+        return self._main_to_barcode.get(main_sku)
+
+    def lookup_barcode(self, barcode: str) -> Optional[str]:
+        """Возвращает main_sku по штрихкоду, или None если не найден."""
+        return self._barcode_to_main.get(barcode)
+
+    def brand(self, main_sku: str) -> str:
+        return self._main_to_brand.get(main_sku, "")
+
+    def product_info(self, main_sku: str) -> dict:
+        """Полная информация о товаре по main_sku."""
+        info = self._main_info.get(main_sku)
+        return {
+            "main_sku": main_sku,
+            "name": info[0] if info else main_sku,
+            "is_kit": info[1] if info else False,
+            "barcode": self._main_to_barcode.get(main_sku),
+            "brand": self._main_to_brand.get(main_sku, ""),
+        }
 
     def __len__(self):
         return len(self._main_info)
