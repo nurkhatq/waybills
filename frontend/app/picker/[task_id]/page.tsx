@@ -82,6 +82,10 @@ export default function PickerTaskPage() {
     return t.orders.find(o => !o.scan) ?? null;
   }
 
+  function orderKey(o: PickerOrderItem) {
+    return `${o.order_code}-${o.position_index ?? 0}`;
+  }
+
   useEffect(() => {
     const u = loadUser();
     if (!u) { router.replace("/login"); return; }
@@ -124,13 +128,13 @@ export default function PickerTaskPage() {
       return;
     }
 
-    await doScan(currentOrder.order_code, barcode, status);
+    await doScan(currentOrder.order_code, currentOrder.position_index ?? 0, barcode, status);
   }
 
-  async function doScan(orderCode: string, barcode: string | null, status: ScanStatus) {
+  async function doScan(orderCode: string, positionIndex: number, barcode: string | null, status: ScanStatus) {
     if (!task) return;
     try {
-      const updated = await picker.scan(taskId, { order_code: orderCode, barcode: barcode ?? undefined, match_status: status });
+      const updated = await picker.scan(taskId, { order_code: orderCode, position_index: positionIndex, barcode: barcode ?? undefined, match_status: status });
       setTask(updated);
       setCurrentOrder(nextPending(updated));
       setError(null);
@@ -150,7 +154,7 @@ export default function PickerTaskPage() {
     if (!currentOrder || processing) return;
     setScannerActive(false);
     setProcessing(true);
-    await doScan(currentOrder.order_code, null, "no_barcode");
+    await doScan(currentOrder.order_code, currentOrder.position_index ?? 0, null, "no_barcode");
   }
 
   // ── BULK MODE ────────────────────────────────────────────────────────────────
@@ -481,12 +485,12 @@ export default function PickerTaskPage() {
           <div className="space-y-1.5">
             {task.orders.map((order) => {
               const st = order.scan?.match_status as ScanStatus | undefined;
-              const isCurrent = order.order_code === currentOrder?.order_code;
+              const isCurrent = order.order_code === currentOrder?.order_code && (order.position_index ?? 0) === (currentOrder?.position_index ?? 0);
               const expectedBc = order.expected_barcode ?? (isTypeA ? task.expected_barcode : null);
               const isKit = !!(order as PickerOrderItem & { is_kit?: boolean }).is_kit;
               return (
                 <div
-                  key={order.order_code}
+                  key={orderKey(order)}
                   className={`bg-white rounded-xl border p-3 flex items-start gap-3 ${
                     isCurrent && !allDone ? "border-blue-400 border-2" : "border-gray-100"
                   }`}
@@ -494,7 +498,11 @@ export default function PickerTaskPage() {
                   <span className="text-lg shrink-0 mt-0.5">{matchIcon(st)}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 leading-tight">{order.name}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{order.order_code}{order.quantity > 1 ? ` · ${order.quantity} шт` : ""}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {order.order_code}
+                      {(order.num_positions ?? 1) > 1 && ` · поз. ${(order.position_index ?? 0) + 1}/${order.num_positions}`}
+                      {order.quantity > 1 ? ` · ${order.quantity} шт` : ""}
+                    </p>
                     <p className="text-xs mt-0.5">
                       {isKit
                         ? <span className="text-purple-500">Комплект — любой компонент</span>
@@ -545,7 +553,7 @@ export default function PickerTaskPage() {
             )}
             <div className="space-y-2">
               <button
-                onClick={() => doScan(unknownModal.orderCode, unknownModal.barcode, "unknown_barcode")}
+                onClick={() => doScan(unknownModal.orderCode, unknownModal.orderItem?.position_index ?? 0, unknownModal.barcode, "unknown_barcode")}
                 className="w-full bg-yellow-500 text-white rounded-xl py-3 font-semibold text-sm"
               >
                 ⚠️ Записать на заметку

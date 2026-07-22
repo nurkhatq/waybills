@@ -243,11 +243,13 @@ export const api = {
 
 export interface PickerOrderItem {
   order_code: string;
+  position_index?: number;
   kaspi_order_id: string;
   offer_code: string;
   name: string;
   quantity: number;
   expected_barcode?: string | null;
+  num_positions?: number;
   scan?: {
     barcode_scanned: string | null;
     match_status: string;
@@ -326,7 +328,7 @@ export const picker = {
   getTask: (taskId: number) =>
     req<PickerTask>(`/picker/tasks/${taskId}`),
 
-  scan: (taskId: number, body: { order_code: string; barcode?: string | null; match_status?: string }) =>
+  scan: (taskId: number, body: { order_code: string; position_index?: number; barcode?: string | null; match_status?: string }) =>
     req<PickerTask>(`/picker/tasks/${taskId}/scan`, {
       method: "POST",
       body: JSON.stringify(body),
