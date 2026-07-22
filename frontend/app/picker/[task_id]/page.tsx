@@ -133,9 +133,12 @@ export default function PickerTaskPage() {
       setTask(updated);
       setCurrentOrder(nextPending(updated));
       setError(null);
+      setUnknownModal(null);
+      setProcessing(false);
+      // ~1 сек пауза перед следующим сканом — успеть убрать товар
+      setTimeout(() => setScannerActive(true), 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
-    } finally {
       setUnknownModal(null);
       setScannerActive(true);
       setProcessing(false);
@@ -494,16 +497,10 @@ export default function PickerTaskPage() {
             )}
             <div className="space-y-2">
               <button
-                onClick={() => doScan(unknownModal.orderCode, unknownModal.barcode, "matched")}
-                className="w-full bg-green-600 text-white rounded-xl py-3 font-semibold text-sm"
-              >
-                ✅ Всё верно, это нужный товар
-              </button>
-              <button
                 onClick={() => doScan(unknownModal.orderCode, unknownModal.barcode, "unknown_barcode")}
                 className="w-full bg-yellow-500 text-white rounded-xl py-3 font-semibold text-sm"
               >
-                ⚠️ Записать на заметку (разобраться позже)
+                ⚠️ Записать на заметку
               </button>
               <button
                 onClick={() => { setUnknownModal(null); setScannerActive(true); setProcessing(false); }}
