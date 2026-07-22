@@ -312,7 +312,7 @@ export const picker = {
     }),
 
   complete: (taskId: number) =>
-    req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number }>(
+    req<{ task_id: number; status: string; total_orders: number; scanned: number; no_barcode: number; skipped: number; assembled_in_kaspi?: number; assemble_errors?: string[] }>(
       `/picker/tasks/${taskId}/complete`,
       { method: "POST" }
     ),
