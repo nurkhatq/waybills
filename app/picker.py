@@ -80,10 +80,17 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     inv = get_inventory()
 
     # Группируем по main_sku (через primary_sku из Order, уже resolved при сортировке)
+    # Заказы с несколькими позициями (num_positions > 1) сразу идут в тип B —
+    # они содержат разные SKU и не могут быть частью одноимённого A-sweep.
     groups: dict[str, list] = defaultdict(list)
+    multi_position_items = []  # сразу в тип B
     for o in orders_db:
         entries = json.loads(o.entries_json or "[]")
         if not entries:
+            continue
+        if o.num_positions > 1:
+            brand = inv.brand(o.primary_sku or "") if o.primary_sku else ""
+            multi_position_items.append((brand, o.primary_sku or "", o, entries))
             continue
         first_offer = (entries[0].get("offer") or {}).get("code", "")
         main_sku = inv.resolve(first_offer) if first_offer else (o.primary_sku or "")
@@ -97,6 +104,8 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
             brand = inv.brand(sku) if sku else ""
             for o, entries in items:
                 type_b_items.append((brand, sku, o, entries))
+    # Многопозиционные заказы добавляем в конец типа B
+    type_b_items.extend(multi_position_items)
 
     type_b_items.sort(key=lambda x: _brand_sort_key(x[0]))
 
