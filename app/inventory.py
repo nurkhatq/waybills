@@ -23,6 +23,10 @@ class Inventory:
         self._main_to_barcode: Dict[str, str] = {}
         # main_sku → brand
         self._main_to_brand: Dict[str, str] = {}
+        # main_sku → [{sku, name, qty}] для комплектов
+        self._main_to_components: Dict[str, list] = {}
+        # main_sku → список URL изображений
+        self._main_to_images: Dict[str, list] = {}
 
     def load(self, csv_path: str):
         if not os.path.exists(csv_path):
@@ -93,6 +97,35 @@ class Inventory:
                     if bc_all and not is_dop:
                         self._main_to_barcode[main] = bc_all[0]
 
+                    # Изображения: все URL из comma-separated списка
+                    if not is_dop:
+                        images_raw = (row.get("images", "") or "").strip()
+                        if images_raw:
+                            imgs = [u.strip() for u in images_raw.split(",") if u.strip()]
+                            if imgs:
+                                self._main_to_images[main] = imgs
+
+                    # Компоненты комплектов: "sku|name|qty; sku2|name2|qty2"
+                    if is_kit and not is_dop:
+                        comp_raw = (row.get("components", "") or "").strip()
+                        if comp_raw:
+                            comps = []
+                            for part in comp_raw.split(";"):
+                                part = part.strip()
+                                if not part:
+                                    continue
+                                pieces = [p.strip() for p in part.split("|")]
+                                if len(pieces) >= 2:
+                                    comp_qty = 1
+                                    if len(pieces) >= 3 and pieces[2]:
+                                        try:
+                                            comp_qty = int(float(pieces[2]))
+                                        except ValueError:
+                                            pass
+                                    comps.append({"sku": pieces[0], "name": pieces[1], "qty": comp_qty})
+                            if comps:
+                                self._main_to_components[main] = comps
+
                     count += 1
             logger.info(f"Inventory loaded: {count} products, {len(self._sku_to_main)} SKU mappings")
         except Exception as e:
@@ -142,6 +175,10 @@ class Inventory:
     def brand(self, main_sku: str) -> str:
         return self._main_to_brand.get(main_sku, "")
 
+    def kit_components(self, main_sku: str) -> list:
+        """Список компонентов комплекта: [{sku, name, qty}]. Пустой для не-комплектов."""
+        return self._main_to_components.get(main_sku, [])
+
     def product_info(self, main_sku: str) -> dict:
         """Полная информация о товаре по main_sku."""
         info = self._main_info.get(main_sku)
@@ -151,6 +188,8 @@ class Inventory:
             "is_kit": info[1] if info else False,
             "barcode": self._main_to_barcode.get(main_sku),
             "brand": self._main_to_brand.get(main_sku, ""),
+            "components": self._main_to_components.get(main_sku, []),
+            "images": self._main_to_images.get(main_sku, []),
         }
 
     def __len__(self):

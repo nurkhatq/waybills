@@ -215,6 +215,7 @@ class PickerScan(Base):
     id = Column(Integer, primary_key=True)
     task_id = Column(Integer, ForeignKey("picker_tasks.id"), nullable=False, index=True)
     order_code = Column(String, nullable=False)
+    position_index = Column(Integer, nullable=False, default=0)
     offer_code = Column(String, nullable=True)
     # Что реально отсканировали
     barcode_scanned = Column(String, nullable=True)
@@ -223,6 +224,7 @@ class PickerScan(Base):
     # no_barcode — у товара нет штрихкода ни в системе ни физически
     # skipped — пропущен сборщиком
     match_status = Column(String, nullable=False, default="matched")
+    quantity_scanned = Column(Integer, nullable=False, default=1)
     scanned_at = Column(DateTime, default=now)
 
     task = relationship("PickerTask", back_populates="scans")

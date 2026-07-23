@@ -42,6 +42,7 @@ BATCH_SIZE = 6       # Размер пачки для типа B
 
 class ScanBody(BaseModel):
     order_code: str
+    position_index: int = 0
     barcode: str | None = None       # None = кнопка "нет штрихкода"
     match_status: str = "matched"    # matched | unknown_barcode | no_barcode | skipped
 
@@ -77,6 +78,18 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     if not orders_db:
         return 0
 
+    # Чистим устаревшие PDF накладных для этого job — при пересоздании задач
+    # SQLite переиспользует ID (без AUTOINCREMENT), и старый picker_N.pdf может
+    # достаться новой задаче с тем же N → os.path.exists() вернёт True и отдаст чужой PDF.
+    import glob as _glob
+    job_pdf_dir = os.path.join(settings.data_dir, str(job_id))
+    for old_pdf in _glob.glob(os.path.join(job_pdf_dir, "picker_*.pdf")):
+        try:
+            os.remove(old_pdf)
+            logger.info(f"picker: удалён устаревший {old_pdf}")
+        except OSError:
+            pass
+
     inv = get_inventory()
 
     # Один SKU = одна задача (без лимита batch size).
@@ -103,7 +116,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         result = []
         for o, entries in items:
             first_entry = entries[0] if entries else {}
-            name = (first_entry.get("offer") or {}).get("name", "") or info.get("name", "") or sku
+            name = (first_entry.get("offer") or {}).get("name", "") or sku
             offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
             result.append({
                 "order_code": o.order_code,
@@ -113,6 +126,8 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                 "quantity": o.total_qty,
                 "expected_barcode": info.get("barcode"),
                 "is_kit": info.get("is_kit", False),
+                "components": info.get("components", []),
+                "images": info.get("images", []),
             })
         return result
 
@@ -121,7 +136,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
         task_type = "A" if len(items) >= MASS_THRESHOLD else "B"
         task_orders = _make_task_orders_single(sku, items, info)
-        display_name = task_orders[0]["name"] if task_orders else (info.get("name") or sku)
+        display_name = task_orders[0]["name"] if task_orders else sku
         db.add(models.PickerTask(
             city=city,
             task_type=task_type,
@@ -135,36 +150,41 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         ))
         created += 1
 
-    # Мультипозиционные → одна задача на primary_sku группу
+    # Мультипозиционные → каждый заказ = своя задача C
     for sku, items in multi_groups.items():
-        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
-        task_orders = []
         for o, entries in items:
-            names = [(e.get("offer") or {}).get("name", "") for e in entries if (e.get("offer") or {}).get("name")]
-            name = " + ".join(names) if names else (info.get("name") or sku)
-            offer_code = (entries[0].get("offer") or {}).get("code", "") or sku
-            task_orders.append({
-                "order_code": o.order_code,
-                "kaspi_order_id": None,
-                "offer_code": offer_code,
-                "name": name,
-                "quantity": o.total_qty,
-                "expected_barcode": None,
-                "is_kit": False,
-                "num_positions": o.num_positions,
-            })
-        display_name = task_orders[0]["name"] if task_orders else (info.get("name") or sku)
-        db.add(models.PickerTask(
-            city=city,
-            task_type="B",
-            offer_code=sku,
-            product_name=display_name,
-            orders_json=json.dumps(task_orders, ensure_ascii=False),
-            total_orders=len(task_orders),
-            total_qty=sum(item["quantity"] for item in task_orders),
-            waybill_job_id=job_id,
-        ))
-        created += 1
+            task_orders = []
+            for pos_idx, entry in enumerate(entries):
+                offer = entry.get("offer") or {}
+                offer_code = offer.get("code", "") or sku
+                name = offer.get("name", "") or sku
+                entry_info = inv.product_info(inv.resolve(offer_code)) if offer_code else {"barcode": None, "is_kit": False, "components": []}
+                qty = entry.get("quantity", 1)
+                task_orders.append({
+                    "order_code": o.order_code,
+                    "position_index": pos_idx,
+                    "kaspi_order_id": None,
+                    "offer_code": offer_code,
+                    "name": name,
+                    "quantity": qty,
+                    "expected_barcode": entry_info.get("barcode"),
+                    "is_kit": entry_info.get("is_kit", False),
+                    "components": entry_info.get("components", []),
+                    "images": entry_info.get("images", []),
+                    "num_positions": o.num_positions,
+                })
+            display_name = task_orders[0]["name"] if task_orders else sku
+            db.add(models.PickerTask(
+                city=city,
+                task_type="C",
+                offer_code=o.primary_sku or sku,
+                product_name=display_name,
+                orders_json=json.dumps(task_orders, ensure_ascii=False),
+                total_orders=len(task_orders),
+                total_qty=sum(item["quantity"] for item in task_orders),
+                waybill_job_id=job_id,
+            ))
+            created += 1
 
     db.commit()
     _redistribute_tasks(city, db)
@@ -244,6 +264,8 @@ def build_picker_tasks(city: str, db: Session) -> int:
                 "quantity": o.quantity,
                 "expected_barcode": expected_bc,
                 "is_kit": is_kit,
+                "components": info.get("components", []),
+                "images": info.get("images", []),
             }
             for o in ords
         ]
@@ -273,6 +295,8 @@ def build_picker_tasks(city: str, db: Session) -> int:
             "quantity": o.quantity,
             "expected_barcode": info.get("barcode"),
             "is_kit": is_kit,
+            "components": info.get("components", []),
+            "images": info.get("images", []),
         } for o in ords]
         display_name = batch[0]["name"] if batch else (info.get("name") or sku)
         db.add(models.PickerTask(
@@ -339,7 +363,9 @@ def _build_picker_pdf(task: models.PickerTask, db: Session) -> str | None:
 
     from pypdf import PdfWriter, PdfReader
 
-    order_codes = [o["order_code"] for o in json.loads(task.orders_json or "[]")]
+    # Дедупликация: у мультипозиционных заказов один order_code → несколько позиций
+    all_codes = [o["order_code"] for o in json.loads(task.orders_json or "[]")]
+    order_codes = list(dict.fromkeys(all_codes))  # сохраняет порядок, убирает дубли
     if not order_codes:
         return None
 
@@ -408,41 +434,47 @@ def _active_sessions(city: str, db: Session) -> list:
 
 
 def _redistribute_tasks(city: str, db: Session) -> int:
-    """Round-robin: раздать pending-задачи активным сессиям."""
+    """Round-robin: раздать/перебалансировать незапущенные задачи между активными сессиями."""
     sessions = _active_sessions(city, db)
     if not sessions:
         return 0
-    pending = (
+    # Пул = pending + claimed-незапущенные (scanned_qty == 0)
+    # Так второй сборщик получает задачи даже когда всё уже claimed первым
+    pool = (
         db.query(models.PickerTask)
         .filter(
             models.PickerTask.city == city,
-            models.PickerTask.status == "pending",
+            models.PickerTask.status.in_(["pending", "claimed"]),
+            models.PickerTask.scanned_qty == 0,
         )
         .order_by(models.PickerTask.id)
         .all()
     )
-    for i, task in enumerate(pending):
-        s = sessions[i % len(sessions)]
+    n = len(sessions)
+    for i, task in enumerate(pool):
+        s = sessions[i % n]
         task.picker_username = s.username
         task.status = "claimed"
         task.claimed_at = datetime.now(timezone.utc)
-    if pending:
+    if pool:
         db.commit()
-    return len(pending)
+    return len(pool)
 
 
 def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
     orders = json.loads(task.orders_json or "[]")
-    scan_map = {}
+    scan_map: dict[tuple, dict] = {}
     if include_scans:
         for s in (task.scans or []):
-            scan_map[s.order_code] = {
+            key = (s.order_code, getattr(s, "position_index", 0))
+            scan_map[key] = {
                 "barcode_scanned": s.barcode_scanned,
                 "match_status": s.match_status,
+                "qty_done": getattr(s, "quantity_scanned", 1),
                 "scanned_at": s.scanned_at.isoformat() if s.scanned_at else None,
             }
     for o in orders:
-        o["scan"] = scan_map.get(o["order_code"])
+        o["scan"] = scan_map.get((o["order_code"], o.get("position_index", 0)))
     return {
         "id": task.id,
         "city": task.city,
@@ -464,7 +496,16 @@ def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
 
 
 def _count_scanned(task: models.PickerTask) -> int:
-    return len([s for s in task.scans if s.match_status != "skipped"])
+    orders_list = json.loads(task.orders_json or "[]")
+    qty_map = {(o["order_code"], o.get("position_index", 0)): o.get("quantity", 1) for o in orders_list}
+    count = 0
+    for s in task.scans:
+        if s.match_status == "skipped":
+            continue
+        required = qty_map.get((s.order_code, getattr(s, "position_index", 0)), 1)
+        if getattr(s, "quantity_scanned", 1) >= required:
+            count += 1
+    return count
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -485,6 +526,22 @@ def build_tasks(
         models.PickerTask.status == "pending",
     ).count()
     return {"created": created, "pending_tasks": pending}
+
+
+@router.post("/build-from-job/{job_id}")
+def build_tasks_from_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Пересоздать задачи из конкретного Job (накладных). Только admin."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Только для admin")
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job не найден")
+    created = build_picker_tasks_from_job(job_id, job.city, db)
+    return {"created": created, "job_id": job_id, "city": job.city}
 
 
 @router.get("/tasks")
@@ -508,6 +565,7 @@ def list_tasks(
         .filter(
             models.PickerTask.city == city,
             models.PickerTask.status.in_(["pending", "claimed"]),
+            models.PickerTask.task_type != "CANCEL",
         )
         .order_by(models.PickerTask.id)
         .all()
@@ -520,6 +578,118 @@ def list_tasks(
             None,
         ),
     }
+
+
+@router.get("/cancel-queue")
+def get_cancel_queue(
+    city: str | None = None,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Очередь заказов на отмену (товар закончился на складе). Только для менеджера/admin."""
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(403, "Нет доступа")
+    target_city = city or user.get("city", "almaty")
+    tasks = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == target_city,
+            models.PickerTask.task_type == "CANCEL",
+            models.PickerTask.status == "pending",
+        )
+        .order_by(models.PickerTask.created_at)
+        .all()
+    )
+    return {"cancel_tasks": [_task_dict(t) for t in tasks]}
+
+
+@router.post("/cancel-queue/{task_id}/resolve")
+def resolve_cancel_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Пометить задачу отмены как обработанную (менеджер отменил заказы в Kaspi)."""
+    if user.get("role") not in ("admin", "manager"):
+        raise HTTPException(403, "Нет доступа")
+    task = db.get(models.PickerTask, task_id)
+    if not task or task.task_type != "CANCEL":
+        raise HTTPException(404, "Задача не найдена")
+    task.status = "done"
+    task.completed_at = datetime.now(timezone.utc)
+    task.picker_username = user.get("username")
+    db.commit()
+    return {"resolved": True, "task_id": task_id}
+
+
+@router.get("/history")
+def picker_history(
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """История завершённых задач сборщика (за последние 30 дней)."""
+    username = user.get("username")
+    tasks = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.picker_username == username,
+            models.PickerTask.status == "done",
+            models.PickerTask.task_type != "CANCEL",
+        )
+        .order_by(models.PickerTask.completed_at.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for t in tasks:
+        td = _task_dict(t)
+        pj = (
+            db.query(models.PickerPrintJob)
+            .filter(models.PickerPrintJob.picker_task_id == t.id)
+            .first()
+        )
+        td["pdf_filename"] = pj.filename if pj else None
+        result.append(td)
+    return {"tasks": result}
+
+
+@router.post("/tasks/{task_id}/reprint")
+def reprint_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Повторная печать накладной завершённой задачи."""
+    task = db.get(models.PickerTask, task_id)
+    if not task or task.status != "done" or not task.waybill_job_id:
+        raise HTTPException(404, "Задача не найдена, не завершена или нет PDF")
+    if task.city != user.get("city") and user.get("role") not in ("admin", "manager"):
+        raise HTTPException(403, "Нет доступа")
+
+    pj = (
+        db.query(models.PickerPrintJob)
+        .filter(models.PickerPrintJob.picker_task_id == task_id)
+        .order_by(models.PickerPrintJob.id.desc())
+        .first()
+    )
+    filename = pj.filename if pj else None
+
+    if not filename:
+        filename = _build_picker_pdf(task, db)
+        if not filename:
+            raise HTTPException(500, "Не удалось собрать PDF")
+
+    new_pj = models.PickerPrintJob(
+        city=task.city,
+        waybill_job_id=task.waybill_job_id,
+        filename=filename,
+        picker_task_id=task_id,
+        status="pending",
+    )
+    db.add(new_pj)
+    db.commit()
+    return {"queued": True, "filename": filename}
 
 
 @router.post("/tasks/{task_id}/claim")
@@ -586,9 +756,15 @@ def record_scan(
         raise HTTPException(400, "Задание не активно")
 
     orders_list = json.loads(task.orders_json or "[]")
-    order_item = next((o for o in orders_list if o["order_code"] == body.order_code), None)
+    order_item = next(
+        (o for o in orders_list if o["order_code"] == body.order_code and o.get("position_index", 0) == body.position_index),
+        None,
+    )
 
-    existing = next((s for s in task.scans if s.order_code == body.order_code), None)
+    existing = next(
+        (s for s in task.scans if s.order_code == body.order_code and getattr(s, "position_index", 0) == body.position_index),
+        None,
+    )
 
     if body.match_status != "matched":
         # Клиент передал явный статус (no_barcode, skipped и пр.) — доверяем
@@ -604,17 +780,24 @@ def record_scan(
             found = inv.lookup_barcode(body.barcode)
             status = "matched" if found else "unknown_barcode"
 
+    required_qty = order_item.get("quantity", 1) if order_item else 1
+
     if existing:
         existing.barcode_scanned = body.barcode
         existing.match_status = status
         existing.scanned_at = datetime.now(timezone.utc)
+        cur = getattr(existing, "quantity_scanned", 1)
+        if cur < required_qty:
+            existing.quantity_scanned = cur + 1
     else:
         db.add(models.PickerScan(
             task_id=task_id,
             order_code=body.order_code,
+            position_index=body.position_index,
             offer_code=order_item.get("offer_code") if order_item else None,
             barcode_scanned=body.barcode,
             match_status=status,
+            quantity_scanned=1,
         ))
 
     db.flush()
@@ -644,8 +827,8 @@ def bulk_scan(
         raise HTTPException(400, "Задание не активно")
 
     orders_list = json.loads(task.orders_json or "[]")
-    scanned_codes = {s.order_code for s in task.scans}
-    pending_orders = [o for o in orders_list if o["order_code"] not in scanned_codes]
+    scanned_keys = {(s.order_code, getattr(s, "position_index", 0)) for s in task.scans}
+    pending_orders = [o for o in orders_list if (o["order_code"], o.get("position_index", 0)) not in scanned_keys]
 
     inv = get_inventory()
     qty = min(body.quantity, len(pending_orders))
@@ -663,6 +846,7 @@ def bulk_scan(
         db.add(models.PickerScan(
             task_id=task_id,
             order_code=o["order_code"],
+            position_index=o.get("position_index", 0),
             offer_code=o.get("offer_code"),
             barcode_scanned=body.barcode,
             match_status=status,
@@ -697,33 +881,83 @@ def complete_task(
     scans = task.scans
     orders_list = json.loads(task.orders_json or "[]")
 
-    scanned_codes = {
-        s.order_code for s in scans
+    # Количество отсканированных единиц по позиции
+    scan_qty_map = {
+        (s.order_code, getattr(s, "position_index", 0)): getattr(s, "quantity_scanned", 1)
+        for s in scans
         if s.match_status in ("matched", "unknown_barcode", "no_barcode")
     }
+
+    # Группируем позиции по заказу
+    order_positions_map: dict[str, list] = defaultdict(list)
+    for o in orders_list:
+        order_positions_map[o["order_code"]].append(o)
+
+    # Заказ «полностью собран» = все его позиции имеют qty_done >= qty_required
+    fully_done_order_codes = {
+        code for code, positions in order_positions_map.items()
+        if all(
+            scan_qty_map.get((p["order_code"], p.get("position_index", 0)), 0) >= p.get("quantity", 1)
+            for p in positions
+        )
+    }
+
+    # В очередь отмены идут ВСЕ позиции заказов, не полностью собранных
+    unscanned_orders = [
+        o for o in orders_list
+        if o["order_code"] not in fully_done_order_codes
+    ]
+
+    # Создаём задачу-отмену
+    if unscanned_orders:
+        cancel_order_codes = list(dict.fromkeys(o["order_code"] for o in unscanned_orders))
+        db.add(models.PickerTask(
+            city=task.city,
+            task_type="CANCEL",
+            offer_code=task.offer_code,
+            product_name=f"[ОТМЕНА] {task.product_name or ''}",
+            orders_json=json.dumps(unscanned_orders, ensure_ascii=False),
+            total_orders=len(cancel_order_codes),
+            total_qty=sum(o.get("quantity", 1) for o in unscanned_orders),
+            waybill_job_id=task.waybill_job_id,
+            status="pending",
+        ))
+        db.commit()
+        logger.info(f"picker task {task_id}: {len(cancel_order_codes)} orders → CANCEL queue")
+
     assembled_count = 0
     errors = []
     # Waybill-задачи (из накладных) — заказы уже assembled, assemble_order не нужен
     if task.waybill_job_id is None:
+        assembled_codes: set = set()
         for o in orders_list:
-            if o["order_code"] in scanned_codes and o.get("kaspi_order_id"):
-                ok = kaspi.assemble_order(o["kaspi_order_id"], o["order_code"])
+            code = o["order_code"]
+            if code in fully_done_order_codes and code not in assembled_codes and o.get("kaspi_order_id"):
+                ok = kaspi.assemble_order(o["kaspi_order_id"], code)
                 if ok:
                     assembled_count += 1
+                    assembled_codes.add(code)
                 else:
-                    errors.append(o["order_code"])
+                    errors.append(code)
 
     if errors:
         logger.warning(f"picker task {task_id}: assemble_order failed for {errors}")
 
-    # Строим PDF только с накладными этой задачи → очередь на принт-станцию
+    # Строим PDF только если есть хотя бы один полностью собранный заказ.
+    # Если все заказы ушли в отмену — PDF не нужен.
     pdf_filenames: list[str] = []
-    if task.waybill_job_id:
+    if task.waybill_job_id and fully_done_order_codes:
         try:
+            # Передаём только собранные заказы — PDF только для них
+            assembled_orders_json = json.dumps(
+                [o for o in orders_list if o["order_code"] in fully_done_order_codes],
+                ensure_ascii=False,
+            )
+            task.orders_json = assembled_orders_json
             fname = _build_picker_pdf(task, db)
+            task.orders_json = json.dumps(orders_list, ensure_ascii=False)  # восстанавливаем
             if fname:
                 pdf_filenames = [fname]
-                # Каждая picker-задача = отдельный print job
                 db.add(models.PickerPrintJob(
                     city=task.city,
                     waybill_job_id=task.waybill_job_id,
@@ -741,6 +975,7 @@ def complete_task(
         "scanned": len([s for s in scans if s.match_status in ("matched", "unknown_barcode")]),
         "no_barcode": len([s for s in scans if s.match_status == "no_barcode"]),
         "skipped": len([s for s in scans if s.match_status == "skipped"]),
+        "cancelled_orders": len(unscanned_orders),
         "assembled_in_kaspi": assembled_count,
         "assemble_errors": errors,
         "waybill_job_id": task.waybill_job_id,

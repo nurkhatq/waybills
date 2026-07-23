@@ -460,7 +460,9 @@ def download_pdf(
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    if user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
+    # picker_*.pdf доступны с любого города (принт-станция переключается между городами)
+    is_picker_pdf = filename.startswith("picker_")
+    if not is_picker_pdf and user.get("role") not in ("admin", "manager") and job.city != user.get("city"):
         raise HTTPException(403, "Нет доступа")
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(400, "Bad filename")
