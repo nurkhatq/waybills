@@ -117,7 +117,6 @@ export default function PrintStationPage() {
       {/* Header */}
       <div className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🖨</span>
           <div>
             <h1 className="text-lg font-bold">Принт-станция</h1>
             <div className="flex gap-1 mt-1">
@@ -153,14 +152,12 @@ export default function PrintStationPage() {
         {/* Печать в процессе */}
         {printing ? (
           <div className="bg-blue-900/40 border-2 border-blue-500 rounded-2xl p-6 text-center space-y-3">
-            <div className="text-4xl animate-pulse">🖨</div>
             <p className="font-semibold text-blue-200 text-lg">Печать…</p>
             <p className="text-blue-300 font-mono text-sm break-all">{printing.filename}</p>
             <p className="text-xs text-blue-400">Задание #{printing.id}</p>
           </div>
         ) : (
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 text-center space-y-2">
-            <div className="text-3xl">✅</div>
             <p className="text-gray-400 text-sm">Готова к печати</p>
           </div>
         )}
@@ -200,7 +197,7 @@ export default function PrintStationPage() {
         </div>
 
         <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-400 space-y-1">
-          <p className="font-semibold">⚠️ Окно должно быть видимым</p>
+          <p className="font-semibold">Окно должно быть видимым</p>
           <p className="text-yellow-500">Браузер не печатает из свёрнутых вкладок. Откройте в отдельном окне и не сворачивайте его — можно сдвинуть в угол экрана.</p>
         </div>
       </div>

@@ -31,7 +31,6 @@ export default function PickerPage() {
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryTask[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [reprinting, setReprinting] = useState<number | null>(null);
 
   const load = useCallback(async () => {
@@ -51,6 +50,7 @@ export default function PickerPage() {
     if (!u) { router.replace("/login"); return; }
     setUsername(u.username);
     load();
+    loadHistory();
     // Автообновление каждые 30 сек (новые задачи могут появиться)
     const interval = setInterval(load, 30_000);
     return () => clearInterval(interval);
@@ -156,7 +156,6 @@ export default function PickerPage() {
         {/* ── Нет сессии ── */}
         {!inSession && (
           <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-8 text-center space-y-4">
-            <p className="text-3xl">👋</p>
             <p className="font-semibold text-gray-800 text-lg">Начните рабочую сессию</p>
             <p className="text-sm text-gray-500">
               {activeSessions > 0
@@ -192,6 +191,38 @@ export default function PickerPage() {
               </button>
             </div>
 
+            {/* История сборок */}
+            {history.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">История сборок ({history.length})</h2>
+                {history.map(t => (
+                  <div key={t.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3 flex items-start gap-3">
+                    <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 mt-0.5 ${
+                      t.task_type === "A" ? "bg-purple-100 text-purple-700"
+                      : t.task_type === "C" ? "bg-orange-100 text-orange-700"
+                      : "bg-blue-100 text-blue-700"
+                    }`}>{t.task_type}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 leading-tight truncate">{t.product_name ?? "—"}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        #{t.id} · {t.total_orders} позиц.
+                        {t.completed_at && ` · ${new Date(t.completed_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}`}
+                      </p>
+                    </div>
+                    {t.pdf_filename && (
+                      <button
+                        onClick={() => handleReprint(t.id)}
+                        disabled={reprinting === t.id}
+                        className="shrink-0 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-40"
+                      >
+                        {reprinting === t.id ? "…" : "Печать"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </section>
+            )}
+
             {tasks.length === 0 && (
               <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-8 text-center">
                 <p className="text-gray-400 text-sm">Нет назначенных заданий</p>
@@ -222,49 +253,6 @@ export default function PickerPage() {
                 {doneTasks.map(t => <TaskCard key={t.id} task={t} username={username} router={router} />)}
               </section>
             )}
-
-            {/* ── История ── */}
-            <div className="border border-gray-200 rounded-2xl overflow-hidden">
-              <button
-                onClick={() => { setHistoryOpen(o => !o); if (!historyOpen) loadHistory(); }}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:bg-gray-50"
-              >
-                <span className="font-medium">История сборок</span>
-                <span className="text-gray-400">{historyOpen ? "▲" : "▼"}</span>
-              </button>
-              {historyOpen && (
-                <div className="border-t border-gray-100 divide-y divide-gray-50">
-                  {history.length === 0 && (
-                    <p className="text-xs text-gray-400 text-center py-4">Нет завершённых сборок</p>
-                  )}
-                  {history.map(t => (
-                    <div key={t.id} className="px-4 py-3 flex items-start gap-3">
-                      <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 mt-0.5 ${
-                        t.task_type === "A" ? "bg-purple-100 text-purple-700"
-                        : t.task_type === "C" ? "bg-orange-100 text-orange-700"
-                        : "bg-blue-100 text-blue-700"
-                      }`}>{t.task_type}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 leading-tight truncate">{t.product_name ?? "—"}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          #{t.id} · {t.total_orders} позиц.
-                          {t.completed_at && ` · ${new Date(t.completed_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}`}
-                        </p>
-                      </div>
-                      {t.pdf_filename && (
-                        <button
-                          onClick={() => handleReprint(t.id)}
-                          disabled={reprinting === t.id}
-                          className="shrink-0 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-40"
-                        >
-                          {reprinting === t.id ? "…" : "🖨"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {/* Кнопка завершения сессии */}
             <button

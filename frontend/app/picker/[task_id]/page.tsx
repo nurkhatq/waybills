@@ -9,11 +9,11 @@ const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), { ss
 type ScanStatus = "matched" | "unknown_barcode" | "no_barcode" | "skipped";
 
 function matchIcon(s?: ScanStatus | null) {
-  if (s === "matched") return "✅";
-  if (s === "unknown_barcode") return "⚠️";
-  if (s === "no_barcode") return "🚫";
-  if (s === "skipped") return "⏭";
-  return "⬜";
+  if (s === "matched") return "✓";
+  if (s === "unknown_barcode") return "!";
+  if (s === "no_barcode") return "×";
+  if (s === "skipped") return "—";
+  return "○";
 }
 function matchLabel(s?: ScanStatus | null) {
   if (s === "matched") return "Совпало";
@@ -453,7 +453,7 @@ export default function PickerTaskPage() {
             {/* Ошибка неверного ШК в bulk-режиме — показываем сразу при скане */}
             {bulkWrongBarcode && (
               <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 space-y-3">
-                <p className="text-sm font-semibold text-red-800">⚠️ Неверный штрихкод</p>
+                <p className="text-sm font-semibold text-red-800">Неверный штрихкод</p>
                 <p className="text-xs text-red-600 font-mono break-all">{bulkWrongBarcode}</p>
                 <p className="text-xs text-red-500">Ожидается товар: <span className="font-semibold">{task.product_name}</span></p>
                 <div className="flex gap-2">
@@ -484,7 +484,7 @@ export default function PickerTaskPage() {
                 disabled={processing || !currentOrder}
                 className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl py-3 text-sm disabled:opacity-40"
               >
-                🚫 Нет штрихкода на товаре
+                Нет штрихкода на товаре
               </button>
             )}
             {scanMode === "bulk" && !bulkWrongBarcode && (
@@ -496,7 +496,6 @@ export default function PickerTaskPage() {
         {/* ── Все собраны ── */}
         {allDone && (
           <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-5 text-center">
-            <p className="text-2xl mb-2">✅</p>
             <p className="font-bold text-green-800 text-lg">Все заказы отсканированы!</p>
             <p className="text-green-600 text-sm mb-4">{scannedCount} из {task.total_orders}</p>
             <button
@@ -595,8 +594,14 @@ export default function PickerTaskPage() {
                     isCurrent && !allDone ? "border-blue-400 border-2" : "border-gray-100"
                   }`}
                 >
-                  <span className="text-lg shrink-0 mt-0.5">
-                    {!positionDone && qtyDone > 0 ? "🔵" : matchIcon(st)}
+                  <span className={`text-base shrink-0 mt-0.5 font-bold ${
+                    !positionDone && qtyDone > 0 ? "text-blue-500" :
+                    st === "matched" ? "text-green-500" :
+                    st === "unknown_barcode" ? "text-yellow-500" :
+                    st === "no_barcode" ? "text-red-400" :
+                    st === "skipped" ? "text-gray-400" : "text-gray-200"
+                  }`}>
+                    {!positionDone && qtyDone > 0 ? "●" : matchIcon(st)}
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 leading-tight">{order.name}</p>
@@ -661,7 +666,7 @@ export default function PickerTaskPage() {
       {unknownModal && (
         <div className="fixed inset-0 bg-black/60 flex items-end justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3">
-            <h3 className="font-bold text-gray-900">⚠️ Неизвестный штрихкод</h3>
+            <h3 className="font-bold text-gray-900">Неизвестный штрихкод</h3>
             <p className="text-sm text-gray-600">
               <span className="font-mono font-semibold text-xs bg-gray-100 px-1 py-0.5 rounded">{unknownModal.barcode}</span>
               {" "}не совпадает с ожидаемым
@@ -674,7 +679,7 @@ export default function PickerTaskPage() {
                 onClick={() => doScan(unknownModal.orderCode, unknownModal.orderItem?.position_index ?? 0, unknownModal.barcode, "unknown_barcode")}
                 className="w-full bg-yellow-500 text-white rounded-xl py-3 font-semibold text-sm"
               >
-                ⚠️ Записать на заметку
+                Записать на заметку
               </button>
               <button
                 onClick={() => { setUnknownModal(null); setScannerActive(true); setProcessing(false); }}
@@ -691,10 +696,10 @@ export default function PickerTaskPage() {
       {partialModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4">
-            <h3 className="font-bold text-orange-700 text-lg text-center">⚠️ Товар закончился?</h3>
+            <h3 className="font-bold text-orange-700 text-lg text-center">Товар закончился?</h3>
             <div className="text-sm text-gray-600 space-y-1 bg-gray-50 rounded-xl p-3">
-              <p>✅ Собрано: <span className="font-semibold">{scannedCount}</span></p>
-              <p className="text-orange-600">🚫 Не собрано: <span className="font-semibold">{remaining}</span></p>
+              <p>Собрано: <span className="font-semibold">{scannedCount}</span></p>
+              <p className="text-orange-600">Не собрано: <span className="font-semibold">{remaining}</span></p>
             </div>
             <p className="text-xs text-gray-500 text-center">
               {remaining} заказ{remaining === 1 ? "" : remaining < 5 ? "а" : "ов"} будет отправлено в очередь на <span className="font-semibold text-red-600">отмену</span>.
@@ -719,13 +724,13 @@ export default function PickerTaskPage() {
             <h3 className="font-bold text-gray-900 text-lg text-center">Завершить и передать в Kaspi?</h3>
             <div className="text-sm text-gray-600 space-y-1 bg-gray-50 rounded-xl p-3">
               {task.orders.filter(o => o.scan?.match_status === "matched").length > 0 && (
-                <p>✅ Собрано: {task.orders.filter(o => o.scan?.match_status === "matched").length}</p>
+                <p className="text-green-700">Собрано: {task.orders.filter(o => o.scan?.match_status === "matched").length}</p>
               )}
               {task.orders.filter(o => o.scan?.match_status === "unknown_barcode").length > 0 && (
-                <p>⚠️ Неизвестный ШК: {task.orders.filter(o => o.scan?.match_status === "unknown_barcode").length}</p>
+                <p className="text-yellow-700">Неизвестный ШК: {task.orders.filter(o => o.scan?.match_status === "unknown_barcode").length}</p>
               )}
               {task.orders.filter(o => o.scan?.match_status === "no_barcode").length > 0 && (
-                <p>🚫 Нет ШК: {task.orders.filter(o => o.scan?.match_status === "no_barcode").length}</p>
+                <p className="text-red-600">Нет ШК: {task.orders.filter(o => o.scan?.match_status === "no_barcode").length}</p>
               )}
             </div>
             <p className="text-xs text-gray-400 text-center">
