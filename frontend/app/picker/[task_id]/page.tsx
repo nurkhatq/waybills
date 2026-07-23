@@ -268,7 +268,9 @@ export default function PickerTaskPage() {
               <h1 className="text-base font-bold text-gray-900">
                 Задание #{task.id}
                 <span className={`ml-2 text-xs rounded px-1.5 py-0.5 font-medium ${
-                  isTypeA ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                  task.task_type === "A" ? "bg-purple-100 text-purple-700"
+                  : task.task_type === "C" ? "bg-orange-100 text-orange-700"
+                  : "bg-blue-100 text-blue-700"
                 }`}>{task.task_type}</span>
               </h1>
               {task.product_name && (

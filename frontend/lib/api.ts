@@ -260,7 +260,7 @@ export interface PickerOrderItem {
 export interface PickerTask {
   id: number;
   city: string;
-  task_type: "A" | "B";
+  task_type: "A" | "B" | "C";
   offer_code: string | null;
   product_name: string | null;
   expected_barcode: string | null;

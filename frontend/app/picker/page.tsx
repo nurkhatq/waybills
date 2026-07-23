@@ -88,11 +88,17 @@ export default function PickerPage() {
   const inSession = data?.in_session ?? false;
   const tasks = data?.tasks ?? [];
   const activeSessions = data?.active_sessions_count ?? 0;
-  const sortZA = (arr: PickerTask[]) =>
-    [...arr].sort((a, b) => (b.product_name ?? "").localeCompare(a.product_name ?? "", "ru"));
-  const pendingTasks = sortZA(tasks.filter(t => t.scanned_qty === 0));
-  const inProgressTasks = sortZA(tasks.filter(t => t.scanned_qty > 0 && t.scanned_qty < t.total_orders));
-  const doneTasks = sortZA(tasks.filter(t => t.scanned_qty === t.total_orders));
+  const TYPE_ORDER: Record<string, number> = { C: 0, A: 1, B: 2 };
+  const sortTasks = (arr: PickerTask[]) =>
+    [...arr].sort((a, b) => {
+      const typeA = TYPE_ORDER[a.task_type] ?? 9;
+      const typeB = TYPE_ORDER[b.task_type] ?? 9;
+      if (typeA !== typeB) return typeA - typeB;
+      return (a.product_name ?? "").localeCompare(b.product_name ?? "", "ru");
+    });
+  const pendingTasks = sortTasks(tasks.filter(t => t.scanned_qty === 0));
+  const inProgressTasks = sortTasks(tasks.filter(t => t.scanned_qty > 0 && t.scanned_qty < t.total_orders));
+  const doneTasks = sortTasks(tasks.filter(t => t.scanned_qty === t.total_orders));
 
   return (
     <div className="min-h-screen bg-gray-50 pb-10">
@@ -222,7 +228,9 @@ function TaskCard({ task, username, router }: { task: PickerTask; username: stri
       onClick={() => router.push(`/picker/${task.id}`)}
     >
       <div className={`rounded-lg px-2 py-1 text-xs font-bold shrink-0 ${
-        task.task_type === "A" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+        task.task_type === "A" ? "bg-purple-100 text-purple-700"
+        : task.task_type === "C" ? "bg-orange-100 text-orange-700"
+        : "bg-blue-100 text-blue-700"
       }`}>
         {task.task_type}
       </div>
