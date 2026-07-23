@@ -363,6 +363,32 @@ export default function PickerTaskPage() {
           </div>
         )}
 
+        {/* ── Фото товара (bulk-режим, тип A) ── */}
+        {isMyTask && !allDone && scanMode === "bulk" && !isBulkEntry && (() => {
+          const imgs = task.orders[0]?.images;
+          if (!imgs || imgs.length === 0) return null;
+          return (
+            <div className="bg-white rounded-2xl border border-gray-200 p-3 space-y-2">
+              <p className="text-xs font-semibold text-purple-500">{task.product_name}</p>
+              <div className="overflow-x-auto -mx-3 px-3">
+                <div className="flex gap-2 pb-1" style={{ width: "max-content" }}>
+                  {imgs.map((url, i) => (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      key={i}
+                      src={url}
+                      alt=""
+                      className="rounded-xl object-contain bg-gray-50 shrink-0"
+                      style={{ width: 130, height: 130 }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── Быстрый режим: ввод кол-ва после скана ── */}
         {isMyTask && !allDone && scanMode === "bulk" && isBulkEntry && (
           <div className="bg-purple-50 border-2 border-purple-300 rounded-2xl p-4 space-y-3">
