@@ -257,6 +257,7 @@ export interface PickerOrderItem {
   expected_barcode?: string | null;
   is_kit?: boolean;
   components?: KitComponent[];
+  image_url?: string | null;
   num_positions?: number;
   scan?: {
     barcode_scanned: string | null;

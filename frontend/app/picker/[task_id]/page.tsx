@@ -320,6 +320,49 @@ export default function PickerTaskPage() {
           </div>
         )}
 
+        {/* ── Изображения товаров ── */}
+        {(() => {
+          type ImgItem = { offer_code: string; name: string; image_url: string };
+          const seen = new Set<string>();
+          const imgs: ImgItem[] = [];
+          task.orders.forEach(o => {
+            const key = o.offer_code ?? o.name;
+            if (o.image_url && !seen.has(key)) {
+              seen.add(key);
+              imgs.push({ offer_code: key, name: o.name, image_url: o.image_url });
+            }
+          });
+          if (imgs.length === 0) return null;
+          return (
+            <div className="overflow-x-auto -mx-4 px-4">
+              <div className="flex gap-3 pb-1" style={{ width: "max-content" }}>
+                {imgs.map((img) => {
+                  const isCur = scanMode === "per-order" && currentOrder && (currentOrder.offer_code ?? currentOrder.name) === img.offer_code;
+                  return (
+                    <div
+                      key={img.offer_code}
+                      className={`rounded-2xl border-2 overflow-hidden shrink-0 bg-white transition-all ${
+                        isCur ? "border-blue-400 shadow-md" : "border-gray-200"
+                      }`}
+                      style={{ width: 160 }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.image_url}
+                        alt={img.name}
+                        className="w-full object-contain"
+                        style={{ height: 140 }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                      <p className="text-xs text-gray-600 px-2 py-1.5 leading-tight line-clamp-2">{img.name}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── Текущий заказ (per-order) ── */}
         {isMyTask && !allDone && scanMode === "per-order" && currentOrder && (
           <div className="bg-white rounded-2xl border-2 border-blue-200 p-3">
