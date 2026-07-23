@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { picker, PickerTask, PickerOrderItem, loadUser } from "@/lib/api";
+import { picker, PickerTask, PickerOrderItem, KitComponent, loadUser } from "@/lib/api";
 
 const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), { ssr: false });
 
@@ -443,7 +443,8 @@ export default function PickerTaskPage() {
 
         {/* ── Состав пачки (только тип B) ── */}
         {!isTypeA && (() => {
-          const uniq = new Map<string, { name: string; qty: number; barcode: string | null; is_kit: boolean }>();
+          type UniqItem = { name: string; qty: number; barcode: string | null; is_kit: boolean; components: KitComponent[] };
+          const uniq = new Map<string, UniqItem>();
           task.orders.forEach(o => {
             const key = o.offer_code ?? o.name;
             const ex = uniq.get(key);
@@ -452,7 +453,8 @@ export default function PickerTaskPage() {
               name: o.name,
               qty: o.quantity ?? 1,
               barcode: o.expected_barcode ?? null,
-              is_kit: !!(o as PickerOrderItem & { is_kit?: boolean }).is_kit,
+              is_kit: !!o.is_kit,
+              components: o.components ?? [],
             });
           });
           return (
@@ -463,15 +465,25 @@ export default function PickerTaskPage() {
                   <span className="text-blue-400 text-xs mt-0.5">•</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-800 leading-tight">{item.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {item.qty > 1 && <span className="mr-2">×{item.qty}</span>}
-                      {item.is_kit
-                        ? <span className="text-purple-600">Комплект</span>
-                        : item.barcode
-                          ? <span className="font-mono text-gray-400">{item.barcode}</span>
-                          : <span className="text-orange-500">Нет ШК в системе</span>
-                      }
-                    </p>
+                    {item.is_kit && item.components.length > 0 ? (
+                      <div className="mt-0.5 space-y-0.5">
+                        {item.components.map((c, ci) => (
+                          <p key={ci} className="text-xs text-purple-600">
+                            ↳ {c.name}{c.qty > 1 ? ` ×${c.qty}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        {item.qty > 1 && <span className="mr-2">×{item.qty}</span>}
+                        {item.is_kit
+                          ? <span className="text-purple-600">Комплект</span>
+                          : item.barcode
+                            ? <span className="font-mono text-gray-400">{item.barcode}</span>
+                            : <span className="text-orange-500">Нет ШК в системе</span>
+                        }
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -505,14 +517,24 @@ export default function PickerTaskPage() {
                       {(order.num_positions ?? 1) > 1 && ` · поз. ${(order.position_index ?? 0) + 1}/${order.num_positions}`}
                       {order.quantity > 1 ? ` · ${order.quantity} шт` : ""}
                     </p>
-                    <p className="text-xs mt-0.5">
-                      {isKit
-                        ? <span className="text-purple-500">Комплект — любой компонент</span>
-                        : expectedBc
-                          ? <span className="font-mono text-gray-400">{expectedBc}</span>
-                          : <span className="text-orange-500">Нет ШК в системе</span>
-                      }
-                    </p>
+                    {isKit && order.components && order.components.length > 0 ? (
+                      <div className="mt-1 space-y-0.5">
+                        {order.components.map((c: KitComponent, ci: number) => (
+                          <p key={ci} className="text-xs text-purple-600">
+                            ↳ {c.name}{c.qty > 1 ? ` ×${c.qty}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs mt-0.5">
+                        {isKit
+                          ? <span className="text-purple-500">Комплект — скан любого компонента</span>
+                          : expectedBc
+                            ? <span className="font-mono text-gray-400">{expectedBc}</span>
+                            : <span className="text-orange-500">Нет ШК в системе</span>
+                        }
+                      </p>
+                    )}
                     {order.scan?.barcode_scanned && (
                       <p className="text-xs text-green-600 font-mono mt-0.5">✓ {order.scan.barcode_scanned}</p>
                     )}

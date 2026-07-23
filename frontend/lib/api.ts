@@ -241,6 +241,12 @@ export const api = {
 
 // ── Picker types ──────────────────────────────────────────────────────────────
 
+export interface KitComponent {
+  sku: string;
+  name: string;
+  qty: number;
+}
+
 export interface PickerOrderItem {
   order_code: string;
   position_index?: number;
@@ -249,6 +255,8 @@ export interface PickerOrderItem {
   name: string;
   quantity: number;
   expected_barcode?: string | null;
+  is_kit?: boolean;
+  components?: KitComponent[];
   num_positions?: number;
   scan?: {
     barcode_scanned: string | null;
