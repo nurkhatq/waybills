@@ -241,7 +241,10 @@ function TaskCard({ task, username, router }: { task: PickerTask; username: stri
           {task.product_name ?? "—"}
         </p>
         <p className="text-xs text-gray-500">
-          {task.total_orders} заказ{task.total_orders === 1 ? "" : task.total_orders < 5 ? "а" : "ов"}
+          {task.task_type === "C" && task.orders.length > 0
+            ? `${task.orders[0].order_code} · ${task.total_orders} поз.`
+            : `${task.total_orders} заказ${task.total_orders === 1 ? "" : task.total_orders < 5 ? "а" : "ов"}`
+          }
         </p>
         {(inProgress || isDone) && (
           <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden">

@@ -80,7 +80,7 @@ export default function PickerTaskPage() {
   }, [taskId, modeInitialized]);
 
   function nextPending(t: PickerTask): PickerOrderItem | null {
-    return t.orders.find(o => !o.scan) ?? null;
+    return t.orders.find(o => (o.scan?.qty_done ?? 0) < (o.quantity ?? 1)) ?? null;
   }
 
   function orderKey(o: PickerOrderItem) {
@@ -251,7 +251,7 @@ export default function PickerTaskPage() {
     );
   }
 
-  const scannedCount = task.orders.filter(o => o.scan).length;
+  const scannedCount = task.orders.filter(o => (o.scan?.qty_done ?? 0) >= (o.quantity ?? 1)).length;
   const allDone = scannedCount === task.total_orders;
   const isMyTask = task.picker_username === username;
   const progress = task.total_orders > 0 ? (scannedCount / task.total_orders) * 100 : 0;
@@ -320,56 +320,19 @@ export default function PickerTaskPage() {
           </div>
         )}
 
-        {/* ── Изображения товаров ── */}
-        {(() => {
-          type ImgItem = { offer_code: string; name: string; image_url: string };
-          const seen = new Set<string>();
-          const imgs: ImgItem[] = [];
-          task.orders.forEach(o => {
-            const key = o.offer_code ?? o.name;
-            if (o.image_url && !seen.has(key)) {
-              seen.add(key);
-              imgs.push({ offer_code: key, name: o.name, image_url: o.image_url });
-            }
-          });
-          if (imgs.length === 0) return null;
-          return (
-            <div className="overflow-x-auto -mx-4 px-4">
-              <div className="flex gap-3 pb-1" style={{ width: "max-content" }}>
-                {imgs.map((img) => {
-                  const isCur = scanMode === "per-order" && currentOrder && (currentOrder.offer_code ?? currentOrder.name) === img.offer_code;
-                  return (
-                    <div
-                      key={img.offer_code}
-                      className={`rounded-2xl border-2 overflow-hidden shrink-0 bg-white transition-all ${
-                        isCur ? "border-blue-400 shadow-md" : "border-gray-200"
-                      }`}
-                      style={{ width: 160 }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={img.image_url}
-                        alt={img.name}
-                        className="w-full object-contain"
-                        style={{ height: 140 }}
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                      <p className="text-xs text-gray-600 px-2 py-1.5 leading-tight line-clamp-2">{img.name}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
-
         {/* ── Текущий заказ (per-order) ── */}
         {isMyTask && !allDone && scanMode === "per-order" && currentOrder && (
-          <div className="bg-white rounded-2xl border-2 border-blue-200 p-3">
-            <p className="text-xs font-semibold text-blue-500 mb-1">СЕЙЧАС ИЩЕМ</p>
+          <div className="bg-white rounded-2xl border-2 border-blue-200 p-3 space-y-2">
+            <p className="text-xs font-semibold text-blue-500">СЕЙЧАС ИЩЕМ</p>
             <p className="font-semibold text-gray-900 text-sm leading-tight">{currentOrder.name}</p>
-            <p className="text-xs text-gray-400 mt-0.5">{currentOrder.order_code}</p>
-            {/* Для типа A штрихкод хранится на уровне task, для B — в каждом order item */}
+            <p className="text-xs text-gray-400">{currentOrder.order_code}</p>
+            {/* Прогресс количества */}
+            {(currentOrder.quantity ?? 1) > 1 && (
+              <p className="text-sm font-semibold text-blue-600">
+                Отсканировано {currentOrder.scan?.qty_done ?? 0} / {currentOrder.quantity} шт
+              </p>
+            )}
+            {/* Штрихкод */}
             {(currentOrder.expected_barcode || task.expected_barcode) && (
               <p className="text-xs text-gray-400">ШК: {currentOrder.expected_barcode ?? task.expected_barcode}</p>
             )}
@@ -378,6 +341,24 @@ export default function PickerTaskPage() {
             )}
             {(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && (
               <p className="text-xs text-purple-500">Комплект — скан любого компонента</p>
+            )}
+            {/* Фото товара */}
+            {currentOrder.images && currentOrder.images.length > 0 && (
+              <div className="overflow-x-auto -mx-3 px-3">
+                <div className="flex gap-2 pb-1" style={{ width: "max-content" }}>
+                  {currentOrder.images.map((url, i) => (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      key={i}
+                      src={url}
+                      alt=""
+                      className="rounded-xl object-contain bg-gray-50 shrink-0"
+                      style={{ width: 130, height: 130 }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -558,7 +539,10 @@ export default function PickerTaskPage() {
           </h2>
           <div className="space-y-1.5">
             {task.orders.map((order) => {
-              const st = order.scan?.match_status as ScanStatus | undefined;
+              const qtyDone = order.scan?.qty_done ?? 0;
+              const qtyRequired = order.quantity ?? 1;
+              const positionDone = qtyDone >= qtyRequired;
+              const st = positionDone ? (order.scan?.match_status as ScanStatus | undefined) : undefined;
               const isCurrent = order.order_code === currentOrder?.order_code && (order.position_index ?? 0) === (currentOrder?.position_index ?? 0);
               const expectedBc = order.expected_barcode ?? (isTypeA ? task.expected_barcode : null);
               const isKit = !!(order as PickerOrderItem & { is_kit?: boolean }).is_kit;
@@ -569,13 +553,19 @@ export default function PickerTaskPage() {
                     isCurrent && !allDone ? "border-blue-400 border-2" : "border-gray-100"
                   }`}
                 >
-                  <span className="text-lg shrink-0 mt-0.5">{matchIcon(st)}</span>
+                  <span className="text-lg shrink-0 mt-0.5">
+                    {!positionDone && qtyDone > 0 ? "🔵" : matchIcon(st)}
+                  </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 leading-tight">{order.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {order.order_code}
                       {(order.num_positions ?? 1) > 1 && ` · поз. ${(order.position_index ?? 0) + 1}/${order.num_positions}`}
-                      {order.quantity > 1 ? ` · ${order.quantity} шт` : ""}
+                      {qtyRequired > 1 && (
+                        <span className={qtyDone > 0 && !positionDone ? " text-blue-500 font-semibold" : ""}>
+                          {` · ${qtyDone > 0 ? `${qtyDone}/` : ""}${qtyRequired} шт`}
+                        </span>
+                      )}
                     </p>
                     {isKit && order.components && order.components.length > 0 ? (
                       <div className="mt-1 space-y-0.5">
@@ -600,12 +590,14 @@ export default function PickerTaskPage() {
                     )}
                   </div>
                   <span className={`text-xs font-medium shrink-0 mt-0.5 ${
-                    st === "matched" ? "text-green-600" :
-                    st === "unknown_barcode" ? "text-yellow-600" :
-                    st === "no_barcode" ? "text-red-500" :
+                    positionDone && st === "matched" ? "text-green-600" :
+                    positionDone && st === "unknown_barcode" ? "text-yellow-600" :
+                    positionDone && st === "no_barcode" ? "text-red-500" :
+                    !positionDone && qtyDone > 0 ? "text-blue-600" :
                     isCurrent && !allDone ? "text-blue-600" : "text-gray-300"
                   }`}>
-                    {isCurrent && !st ? "← текущий" : matchLabel(st)}
+                    {!positionDone && qtyDone > 0 ? `${qtyDone}/${qtyRequired} шт` :
+                     isCurrent && !st ? "← текущий" : matchLabel(positionDone ? st : undefined)}
                   </span>
                 </div>
               );
