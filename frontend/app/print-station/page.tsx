@@ -87,6 +87,8 @@ export default function PrintStationPage() {
     setPrinting(job);
 
     try {
+      // Пытаемся вернуть фокус на окно перед печатью
+      window.focus();
       await api.printPdf(job.waybill_job_id, job.filename);
     } catch (e) {
       setError(`Ошибка печати ${job.filename}: ${e instanceof Error ? e.message : e}`);
@@ -195,6 +197,11 @@ export default function PrintStationPage() {
           <p className="font-semibold text-gray-400">Для авто-печати без диалога:</p>
           <p className="font-mono break-all">chrome.exe --kiosk-printing --app=https://&lt;SITE&gt;/print-station</p>
           <p className="mt-2">Принтер должен быть установлен как принтер по умолчанию в Windows.</p>
+        </div>
+
+        <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-400 space-y-1">
+          <p className="font-semibold">⚠️ Окно должно быть видимым</p>
+          <p className="text-yellow-500">Браузер не печатает из свёрнутых вкладок. Откройте в отдельном окне и не сворачивайте его — можно сдвинуть в угол экрана.</p>
         </div>
       </div>
     </div>

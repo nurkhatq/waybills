@@ -62,6 +62,10 @@ export default function PickerTaskPage() {
 
   // Лайтбокс для просмотра фото
   const [lightbox, setLightbox] = useState<{ images: string[]; idx: number } | null>(null);
+  const lbTouchX = useRef<number | null>(null);
+
+  // Вспышка при успешном скане
+  const [scanFlash, setScanFlash] = useState(false);
 
 
   const loadTask = useCallback(async () => {
@@ -144,7 +148,11 @@ export default function PickerTaskPage() {
       setError(null);
       setUnknownModal(null);
       setProcessing(false);
-      // ~1 сек пауза перед следующим сканом — успеть убрать товар
+      if (status === "matched") {
+        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(60);
+        setScanFlash(true);
+        setTimeout(() => setScanFlash(false), 500);
+      }
       setTimeout(() => setScannerActive(true), 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -255,6 +263,7 @@ export default function PickerTaskPage() {
   }
 
   const scannedCount = task.orders.filter(o => (o.scan?.qty_done ?? 0) >= (o.quantity ?? 1)).length;
+  const anyScanned = task.orders.some(o => !!o.scan);
   const allDone = scannedCount === task.total_orders;
   const isMyTask = task.picker_username === username;
   const progress = task.total_orders > 0 ? (scannedCount / task.total_orders) * 100 : 0;
@@ -463,10 +472,12 @@ export default function PickerTaskPage() {
                 </div>
               </div>
             )}
-            <BarcodeScanner
-              onScan={scanMode === "per-order" ? handleScanPerOrder : handleScanBulk}
-              active={scannerActive && !unknownModal && !processing && !bulkWrongBarcode}
-            />
+            <div className={`rounded-2xl overflow-hidden transition-all duration-300 ${scanFlash ? "ring-4 ring-green-400 shadow-lg shadow-green-200" : ""}`}>
+              <BarcodeScanner
+                onScan={scanMode === "per-order" ? handleScanPerOrder : handleScanBulk}
+                active={scannerActive && !unknownModal && !processing && !bulkWrongBarcode}
+              />
+            </div>
             {scanMode === "per-order" && (
               <button
                 onClick={handleNoBarcode}
@@ -498,7 +509,7 @@ export default function PickerTaskPage() {
         )}
 
         {/* ── Частичное завершение (товар закончился) ── */}
-        {isMyTask && !allDone && scannedCount > 0 && (
+        {isMyTask && !allDone && anyScanned && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-orange-700">Товар закончился?</p>
@@ -743,6 +754,19 @@ export default function PickerTaskPage() {
           <div
             className="lb-overlay fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/92"
             onClick={() => setLightbox(null)}
+            onTouchStart={(e) => { lbTouchX.current = e.touches[0].clientX; }}
+            onTouchEnd={(e) => {
+              if (lbTouchX.current === null) return;
+              const dx = e.changedTouches[0].clientX - lbTouchX.current;
+              lbTouchX.current = null;
+              if (Math.abs(dx) < 40) return;
+              setLightbox(l => {
+                if (!l) return l;
+                if (dx < 0 && l.idx < l.images.length - 1) return { ...l, idx: l.idx + 1 };
+                if (dx > 0 && l.idx > 0) return { ...l, idx: l.idx - 1 };
+                return l;
+              });
+            }}
           >
             {/* Закрыть */}
             <button

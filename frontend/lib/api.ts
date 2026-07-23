@@ -367,6 +367,11 @@ export const picker = {
   printJobDone: (jobId: number) =>
     req<{ done: boolean }>(`/picker/print-jobs/${jobId}/done`, { method: "POST" }),
 
+  history: () => req<{ tasks: (PickerTask & { pdf_filename: string | null })[] }>("/picker/history"),
+
+  reprint: (taskId: number) =>
+    req<{ queued: boolean; filename: string }>(`/picker/tasks/${taskId}/reprint`, { method: "POST" }),
+
   mySession: () => req<MySessionResponse>("/picker/sessions/me"),
 
   startSession: () =>
