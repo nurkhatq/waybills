@@ -58,6 +58,7 @@ export default function PickerTaskPage() {
 
   // Модал завершения
   const [doneModal, setDoneModal] = useState(false);
+  const [partialModal, setPartialModal] = useState(false);
 
 
   const loadTask = useCallback(async () => {
@@ -441,6 +442,22 @@ export default function PickerTaskPage() {
           </div>
         )}
 
+        {/* ── Частичное завершение (товар закончился) ── */}
+        {isMyTask && !allDone && scannedCount > 0 && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-orange-700">Товар закончился?</p>
+              <p className="text-xs text-orange-600">{remaining} заказ{remaining === 1 ? "" : remaining < 5 ? "а" : "ов"} не собрано — уйдут на отмену</p>
+            </div>
+            <button
+              onClick={() => setPartialModal(true)}
+              className="bg-orange-500 text-white rounded-xl px-3 py-2 text-xs font-bold hover:bg-orange-600 shrink-0 ml-3"
+            >
+              Завершить
+            </button>
+          </div>
+        )}
+
         {/* ── Состав пачки (только тип B) ── */}
         {!isTypeA && (() => {
           type UniqItem = { name: string; qty: number; barcode: string | null; is_kit: boolean; components: KitComponent[] };
@@ -587,6 +604,31 @@ export default function PickerTaskPage() {
                 className="w-full bg-gray-100 text-gray-700 rounded-xl py-3 font-semibold text-sm"
               >
                 Пересканировать
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Модал: частичное завершение (товар закончился) ── */}
+      {partialModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4">
+            <h3 className="font-bold text-orange-700 text-lg text-center">⚠️ Товар закончился?</h3>
+            <div className="text-sm text-gray-600 space-y-1 bg-gray-50 rounded-xl p-3">
+              <p>✅ Собрано: <span className="font-semibold">{scannedCount}</span></p>
+              <p className="text-orange-600">🚫 Не собрано: <span className="font-semibold">{remaining}</span></p>
+            </div>
+            <p className="text-xs text-gray-500 text-center">
+              {remaining} заказ{remaining === 1 ? "" : remaining < 5 ? "а" : "ов"} будет отправлено в очередь на <span className="font-semibold text-red-600">отмену</span>.
+              Менеджер обработает их вручную в Kaspi.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setPartialModal(false)} className="flex-1 bg-gray-100 text-gray-700 rounded-xl py-3 font-semibold text-sm">
+                Назад
+              </button>
+              <button onClick={() => { setPartialModal(false); handleComplete(); }} className="flex-1 bg-orange-500 text-white rounded-xl py-3 font-bold text-sm hover:bg-orange-600">
+                Подтвердить
               </button>
             </div>
           </div>
