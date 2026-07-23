@@ -60,6 +60,9 @@ export default function PickerTaskPage() {
   const [doneModal, setDoneModal] = useState(false);
   const [partialModal, setPartialModal] = useState(false);
 
+  // Лайтбокс для просмотра фото
+  const [lightbox, setLightbox] = useState<{ images: string[]; idx: number } | null>(null);
+
 
   const loadTask = useCallback(async () => {
     try {
@@ -352,8 +355,9 @@ export default function PickerTaskPage() {
                       key={i}
                       src={url}
                       alt=""
-                      className="rounded-xl object-contain bg-gray-50 shrink-0"
+                      className="rounded-xl object-contain bg-gray-50 shrink-0 cursor-zoom-in active:scale-95 transition-transform"
                       style={{ width: 130, height: 130 }}
+                      onClick={() => setLightbox({ images: currentOrder.images!, idx: i })}
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                   ))}
@@ -378,8 +382,9 @@ export default function PickerTaskPage() {
                       key={i}
                       src={url}
                       alt=""
-                      className="rounded-xl object-contain bg-gray-50 shrink-0"
+                      className="rounded-xl object-contain bg-gray-50 shrink-0 cursor-zoom-in active:scale-95 transition-transform"
                       style={{ width: 130, height: 130 }}
+                      onClick={() => setLightbox({ images: imgs, idx: i })}
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                   ))}
@@ -725,6 +730,78 @@ export default function PickerTaskPage() {
             </div>
           </div>
         </div>
+      )}
+      {/* ── Лайтбокс ── */}
+      {lightbox && (
+        <>
+          <style>{`
+            @keyframes lb-fade { from { opacity: 0 } to { opacity: 1 } }
+            @keyframes lb-scale { from { opacity: 0; transform: scale(0.88) } to { opacity: 1; transform: scale(1) } }
+            .lb-overlay { animation: lb-fade 0.18s ease both }
+            .lb-img { animation: lb-scale 0.2s cubic-bezier(.22,.68,0,1.2) both }
+          `}</style>
+          <div
+            className="lb-overlay fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/92"
+            onClick={() => setLightbox(null)}
+          >
+            {/* Закрыть */}
+            <button
+              className="absolute top-4 right-5 text-white/70 hover:text-white text-4xl leading-none font-light"
+              onClick={() => setLightbox(null)}
+            >
+              ×
+            </button>
+
+            {/* Счётчик */}
+            {lightbox.images.length > 1 && (
+              <p className="absolute top-5 left-1/2 -translate-x-1/2 text-white/50 text-xs">
+                {lightbox.idx + 1} / {lightbox.images.length}
+              </p>
+            )}
+
+            {/* Изображение */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              key={lightbox.idx}
+              src={lightbox.images[lightbox.idx]}
+              alt=""
+              className="lb-img object-contain rounded-2xl"
+              style={{ maxWidth: "92vw", maxHeight: "78vh" }}
+              onClick={(e) => e.stopPropagation()}
+            />
+
+            {/* Стрелки */}
+            {lightbox.images.length > 1 && (
+              <div className="absolute inset-y-0 inset-x-0 flex items-center justify-between pointer-events-none px-2">
+                <button
+                  className={`pointer-events-auto w-11 h-11 rounded-full bg-white/10 active:bg-white/25 flex items-center justify-center text-white text-2xl transition-opacity ${lightbox.idx === 0 ? "opacity-0" : "opacity-100"}`}
+                  onClick={(e) => { e.stopPropagation(); setLightbox(l => l && l.idx > 0 ? { ...l, idx: l.idx - 1 } : l); }}
+                >
+                  ‹
+                </button>
+                <button
+                  className={`pointer-events-auto w-11 h-11 rounded-full bg-white/10 active:bg-white/25 flex items-center justify-center text-white text-2xl transition-opacity ${lightbox.idx === lightbox.images.length - 1 ? "opacity-0" : "opacity-100"}`}
+                  onClick={(e) => { e.stopPropagation(); setLightbox(l => l && l.idx < l.images.length - 1 ? { ...l, idx: l.idx + 1 } : l); }}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+
+            {/* Точки-индикаторы */}
+            {lightbox.images.length > 1 && (
+              <div className="absolute bottom-8 flex gap-1.5">
+                {lightbox.images.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={(e) => { e.stopPropagation(); setLightbox(l => l ? { ...l, idx: i } : l); }}
+                    className={`rounded-full transition-all ${i === lightbox.idx ? "w-5 h-2 bg-white" : "w-2 h-2 bg-white/35"}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
