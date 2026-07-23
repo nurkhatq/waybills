@@ -14,6 +14,14 @@ import { api, picker, PrintJob, loadUser } from "@/lib/api";
 const POLL_INTERVAL_MS = 5_000;
 const PRINT_COOLDOWN_MS = 20_000; // ждём после window.print() перед следующим
 
+const CITIES = [
+  { key: "almaty", label: "Алматы" },
+  { key: "astana", label: "Астана" },
+  { key: "shymkent", label: "Шымкент" },
+];
+
+const LS_CITY_KEY = "print_station_city";
+
 export default function PrintStationPage() {
   const router = useRouter();
   const [city, setCity] = useState<string>("");
@@ -29,9 +37,19 @@ export default function PrintStationPage() {
   useEffect(() => {
     const u = loadUser();
     if (!u) { router.replace("/login"); return; }
-    setCity(u.city);
-    cityRef.current = u.city;
+    // Приоритет: сохранённый выбор → город пользователя
+    const saved = localStorage.getItem(LS_CITY_KEY) || u.city;
+    setCity(saved);
+    cityRef.current = saved;
   }, [router]);
+
+  function handleCityChange(newCity: string) {
+    localStorage.setItem(LS_CITY_KEY, newCity);
+    setCity(newCity);
+    cityRef.current = newCity;
+    setQueue([]);
+    setConnected(false);
+  }
 
   const poll = useCallback(async () => {
     const c = cityRef.current;
@@ -100,7 +118,21 @@ export default function PrintStationPage() {
           <span className="text-2xl">🖨</span>
           <div>
             <h1 className="text-lg font-bold">Принт-станция</h1>
-            <p className="text-xs text-gray-400">{city}</p>
+            <div className="flex gap-1 mt-1">
+              {CITIES.map(c => (
+                <button
+                  key={c.key}
+                  onClick={() => handleCityChange(c.key)}
+                  className={`text-xs px-2 py-0.5 rounded-md font-medium transition-colors ${
+                    city === c.key
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
