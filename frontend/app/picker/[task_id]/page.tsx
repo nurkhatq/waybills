@@ -279,12 +279,24 @@ export default function PickerTaskPage() {
     );
   }
 
-  const scannedCount = task.orders.filter(o => (o.scan?.qty_done ?? 0) >= (o.quantity ?? 1)).length;
+  // Группируем позиции по order_code — для наборов один заказ = несколько позиций
+  const orderGroups = new Map<string, typeof task.orders>();
+  for (const o of task.orders) {
+    if (!orderGroups.has(o.order_code)) orderGroups.set(o.order_code, []);
+    orderGroups.get(o.order_code)!.push(o);
+  }
+  // Заказ выполнен когда все его позиции отсканированы
+  const scannedCount = Array.from(orderGroups.values()).filter(
+    positions => positions.every(p => (p.scan?.qty_done ?? 0) >= (p.quantity ?? 1))
+  ).length;
   const anyScanned = task.orders.some(o => !!o.scan);
   const allDone = scannedCount === task.total_orders;
   const isMyTask = task.picker_username === username;
   const progress = task.total_orders > 0 ? (scannedCount / task.total_orders) * 100 : 0;
-  const remaining = task.orders.filter(o => !o.scan).length;
+  // Остаток: заказы у которых есть хотя бы одна неотсканированная позиция
+  const remaining = Array.from(orderGroups.values()).filter(
+    positions => positions.some(p => !p.scan)
+  ).length;
   const isTypeA = task.task_type === "A";
   const isBulkEntry = scanMode === "bulk" && bulkBarcode !== null;
 
