@@ -56,9 +56,7 @@ export default function PickerTaskPage() {
   const [bulkQty, setBulkQty] = useState(1);
   const qtyInputRef = useRef<HTMLInputElement>(null);
 
-  // Модал завершения
-  const [doneModal, setDoneModal] = useState(false);
-  const [partialModal, setPartialModal] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
   // Лайтбокс для просмотра фото
   const [lightbox, setLightbox] = useState<{ images: string[]; idx: number } | null>(null);
@@ -153,6 +151,12 @@ export default function PickerTaskPage() {
         setScanFlash(true);
         setTimeout(() => setScanFlash(false), 500);
       }
+      // Авто-завершение: одна позиция + совпало → сразу complete без лишних кнопок
+      const allScanned = updated.orders.every(o => (o.scan?.qty_done ?? 0) >= (o.quantity ?? 1));
+      if (allScanned && updated.orders.length === 1 && status === "matched") {
+        await handleComplete();
+        return;
+      }
       setTimeout(() => setScannerActive(true), 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -213,6 +217,11 @@ export default function PickerTaskPage() {
       setBulkQty(1);
       setScannerActive(true);
       setError(null);
+      const allScanned = updated.orders.every(o => (o.scan?.qty_done ?? 0) >= (o.quantity ?? 1));
+      if (allScanned && updated.orders.length === 1) {
+        await handleComplete();
+        return;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
       setProcessing(false);
@@ -230,16 +239,24 @@ export default function PickerTaskPage() {
   // ── COMPLETE ────────────────────────────────────────────────────────────────
 
   async function handleComplete() {
+    if (completing) return;
+    setCompleting(true);
     try {
       const result = await picker.complete(taskId);
-      setDoneModal(false);
       if (result.assemble_errors && result.assemble_errors.length > 0) {
         setError(`Выполнено. Ошибки передачи в Kaspi (${result.assemble_errors.length}): ${result.assemble_errors.slice(0, 3).join(", ")}`);
       }
       router.push("/picker");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
+      setCompleting(false);
     }
+  }
+
+  function toKZTime(iso: string | null | undefined): string {
+    if (!iso) return "";
+    const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+    return d.toLocaleTimeString("ru-RU", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit" });
   }
 
   async function handleRelease() {
@@ -351,8 +368,8 @@ export default function PickerTaskPage() {
             {!(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && !currentOrder.expected_barcode && !task.expected_barcode && (
               <p className="text-xs text-orange-500">Штрихкод не задан в системе</p>
             )}
-            {(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && (
-              <p className="text-xs text-purple-500">Комплект — скан любого компонента</p>
+            {(currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit && !currentOrder.expected_barcode && (
+              <p className="text-xs text-purple-500">Набор — отсканируйте штрихкод</p>
             )}
             {/* Фото товара */}
             {currentOrder.images && currentOrder.images.length > 0 && (
@@ -499,10 +516,11 @@ export default function PickerTaskPage() {
             <p className="font-bold text-green-800 text-lg">Все заказы отсканированы!</p>
             <p className="text-green-600 text-sm mb-4">{scannedCount} из {task.total_orders}</p>
             <button
-              onClick={() => setDoneModal(true)}
-              className="bg-green-600 text-white rounded-xl px-6 py-3 font-bold hover:bg-green-700"
+              onClick={handleComplete}
+              disabled={completing}
+              className="bg-green-600 text-white rounded-xl px-6 py-3 font-bold hover:bg-green-700 w-full disabled:opacity-50"
             >
-              Завершить и передать в Kaspi
+              {completing ? "Передаём в Kaspi…" : "Завершить и передать в Kaspi"}
             </button>
           </div>
         )}
@@ -515,10 +533,11 @@ export default function PickerTaskPage() {
               <p className="text-xs text-orange-600">{remaining} заказ{remaining === 1 ? "" : remaining < 5 ? "а" : "ов"} не собрано — уйдут на отмену</p>
             </div>
             <button
-              onClick={() => setPartialModal(true)}
-              className="bg-orange-500 text-white rounded-xl px-3 py-2 text-xs font-bold hover:bg-orange-600 shrink-0 ml-3"
+              onClick={handleComplete}
+              disabled={completing}
+              className="bg-orange-500 text-white rounded-xl px-3 py-2 text-xs font-bold hover:bg-orange-600 shrink-0 ml-3 disabled:opacity-50"
             >
-              Завершить
+              {completing ? "…" : "Завершить"}
             </button>
           </div>
         )}
@@ -625,7 +644,7 @@ export default function PickerTaskPage() {
                     ) : (
                       <p className="text-xs mt-0.5">
                         {isKit
-                          ? <span className="text-purple-500">Комплект — скан любого компонента</span>
+                          ? <span className="text-purple-500">Набор</span>
                           : expectedBc
                             ? <span className="font-mono text-gray-400">{expectedBc}</span>
                             : <span className="text-orange-500">Нет ШК в системе</span>
@@ -634,6 +653,9 @@ export default function PickerTaskPage() {
                     )}
                     {order.scan?.barcode_scanned && (
                       <p className="text-xs text-green-600 font-mono mt-0.5">✓ {order.scan.barcode_scanned}</p>
+                    )}
+                    {order.scan?.scanned_at && (
+                      <p className="text-xs text-gray-400 mt-0.5">{toKZTime(order.scan.scanned_at)}</p>
                     )}
                   </div>
                   <span className={`text-xs font-medium shrink-0 mt-0.5 ${
@@ -692,61 +714,6 @@ export default function PickerTaskPage() {
         </div>
       )}
 
-      {/* ── Модал: частичное завершение (товар закончился) ── */}
-      {partialModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4">
-            <h3 className="font-bold text-orange-700 text-lg text-center">Товар закончился?</h3>
-            <div className="text-sm text-gray-600 space-y-1 bg-gray-50 rounded-xl p-3">
-              <p>Собрано: <span className="font-semibold">{scannedCount}</span></p>
-              <p className="text-orange-600">Не собрано: <span className="font-semibold">{remaining}</span></p>
-            </div>
-            <p className="text-xs text-gray-500 text-center">
-              {remaining} заказ{remaining === 1 ? "" : remaining < 5 ? "а" : "ов"} будет отправлено в очередь на <span className="font-semibold text-red-600">отмену</span>.
-              Менеджер обработает их вручную в Kaspi.
-            </p>
-            <div className="flex gap-2">
-              <button onClick={() => setPartialModal(false)} className="flex-1 bg-gray-100 text-gray-700 rounded-xl py-3 font-semibold text-sm">
-                Назад
-              </button>
-              <button onClick={() => { setPartialModal(false); handleComplete(); }} className="flex-1 bg-orange-500 text-white rounded-xl py-3 font-bold text-sm hover:bg-orange-600">
-                Подтвердить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Модал: подтверждение завершения ── */}
-      {doneModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4">
-            <h3 className="font-bold text-gray-900 text-lg text-center">Завершить и передать в Kaspi?</h3>
-            <div className="text-sm text-gray-600 space-y-1 bg-gray-50 rounded-xl p-3">
-              {task.orders.filter(o => o.scan?.match_status === "matched").length > 0 && (
-                <p className="text-green-700">Собрано: {task.orders.filter(o => o.scan?.match_status === "matched").length}</p>
-              )}
-              {task.orders.filter(o => o.scan?.match_status === "unknown_barcode").length > 0 && (
-                <p className="text-yellow-700">Неизвестный ШК: {task.orders.filter(o => o.scan?.match_status === "unknown_barcode").length}</p>
-              )}
-              {task.orders.filter(o => o.scan?.match_status === "no_barcode").length > 0 && (
-                <p className="text-red-600">Нет ШК: {task.orders.filter(o => o.scan?.match_status === "no_barcode").length}</p>
-              )}
-            </div>
-            <p className="text-xs text-gray-400 text-center">
-              Все подтверждённые заказы получат статус &quot;Собран&quot; в Kaspi
-            </p>
-            <div className="flex gap-2">
-              <button onClick={() => setDoneModal(false)} className="flex-1 bg-gray-100 text-gray-700 rounded-xl py-3 font-semibold text-sm">
-                Отмена
-              </button>
-              <button onClick={handleComplete} className="flex-1 bg-green-600 text-white rounded-xl py-3 font-bold text-sm">
-                Завершить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* ── Лайтбокс ── */}
       {lightbox && (
         <>

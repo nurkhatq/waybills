@@ -110,12 +110,10 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
 
     inv = get_inventory()
 
-    # Один SKU = одна задача (без лимита batch size).
-    # Тип A: 5+ заказов одного SKU (bulk scan).
-    # Тип B: 1-4 заказа одного SKU (per-order scan).
-    # Мультипозиционные заказы (разные SKU в одном заказе) → отдельные задачи по primary_sku.
-    single_groups: dict[str, list] = defaultdict(list)  # sku → [(o, entries)]
-    multi_groups: dict[str, list] = defaultdict(list)   # primary_sku → [(o, entries)]
+    single_groups: dict[str, list] = defaultdict(list)     # sku → [(o, entries)] qty=1 обычные
+    multi_qty_groups: dict[str, list] = defaultdict(list)   # sku → [(o, entries)] qty>1 обычные
+    kit_groups: dict[str, list] = defaultdict(list)         # sku → [(o, entries, info)] комплекты
+    multi_groups: dict[str, list] = defaultdict(list)       # primary_sku → [(o, entries)] многопозиционные
 
     for o in orders_db:
         entries = json.loads(o.entries_json or "[]")
@@ -126,7 +124,13 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         else:
             first_offer = (entries[0].get("offer") or {}).get("code", "")
             main_sku = inv.resolve(first_offer) if first_offer else (o.primary_sku or "")
-            single_groups[main_sku].append((o, entries))
+            info = inv.product_info(main_sku) if main_sku else {}
+            if info.get("is_kit"):
+                kit_groups[main_sku].append((o, entries, info))
+            elif o.total_qty > 1:
+                multi_qty_groups[main_sku].append((o, entries))
+            else:
+                single_groups[main_sku].append((o, entries))
 
     created = 0
 
@@ -143,13 +147,71 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                 "name": name,
                 "quantity": o.total_qty,
                 "expected_barcode": info.get("barcode"),
-                "is_kit": info.get("is_kit", False),
-                "components": info.get("components", []),
+                "is_kit": False,
+                "components": [],
                 "images": info.get("images", []),
             })
         return result
 
-    # Один SKU → одна задача
+    # Комплекты → тип C (каждый компонент = отдельная позиция для скана)
+    for sku, kit_items in kit_groups.items():
+        first_info = kit_items[0][2] if kit_items else {}
+        components = first_info.get("components", [])
+        kit_name = first_info.get("name", sku)
+
+        if components:
+            # Одна C-задача: все заказы × все компоненты как позиции
+            task_orders = []
+            n_comp = len(components)
+            for o, entries, info in kit_items:
+                for ci, comp in enumerate(components):
+                    comp_sku = comp.get("sku", "")
+                    comp_info = inv.product_info(comp_sku) if comp_sku else {}
+                    task_orders.append({
+                        "order_code": o.order_code,
+                        "position_index": ci,
+                        "kaspi_order_id": None,
+                        "offer_code": comp_sku or sku,
+                        "name": comp.get("name", "Компонент"),
+                        "quantity": comp.get("qty", 1),
+                        "expected_barcode": comp_info.get("barcode"),
+                        "is_kit": False,
+                        "components": [],
+                        "images": first_info.get("images", []) if ci == 0 else [],
+                        "num_positions": n_comp,
+                    })
+        else:
+            # Компоненты не описаны — скан штрихкода самого набора
+            task_orders = []
+            for o, entries, info in kit_items:
+                first_entry = entries[0] if entries else {}
+                name = (first_entry.get("offer") or {}).get("name", "") or kit_name
+                offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
+                task_orders.append({
+                    "order_code": o.order_code,
+                    "kaspi_order_id": None,
+                    "offer_code": offer_code,
+                    "name": name,
+                    "quantity": o.total_qty,
+                    "expected_barcode": first_info.get("barcode"),
+                    "is_kit": True,
+                    "components": [],
+                    "images": first_info.get("images", []),
+                })
+
+        db.add(models.PickerTask(
+            city=city,
+            task_type="C",
+            offer_code=sku,
+            product_name=f"[Набор] {kit_name}",
+            orders_json=json.dumps(task_orders, ensure_ascii=False),
+            total_orders=len(task_orders),
+            total_qty=sum(t["quantity"] for t in task_orders),
+            waybill_job_id=job_id,
+        ))
+        created += 1
+
+    # Одиночные заказы qty=1 → A (5+ заказов) или B (1-4 заказа)
     for sku, items in single_groups.items():
         info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
         task_type = "A" if len(items) >= MASS_THRESHOLD else "B"
@@ -168,7 +230,25 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         ))
         created += 1
 
-    # Мультипозиционные → каждый заказ = своя задача C
+    # Заказы qty>1 → всегда тип B (нельзя в bulk A-режим)
+    for sku, items in multi_qty_groups.items():
+        info = inv.product_info(sku) if sku else {"name": "", "barcode": None, "is_kit": False}
+        task_orders = _make_task_orders_single(sku, items, info)
+        display_name = task_orders[0]["name"] if task_orders else sku
+        db.add(models.PickerTask(
+            city=city,
+            task_type="B",
+            offer_code=sku,
+            product_name=display_name,
+            expected_barcode=info.get("barcode"),
+            orders_json=json.dumps(task_orders, ensure_ascii=False),
+            total_orders=len(task_orders),
+            total_qty=sum(item["quantity"] for item in task_orders),
+            waybill_job_id=job_id,
+        ))
+        created += 1
+
+    # Многопозиционные → каждый заказ = своя задача C
     for sku, items in multi_groups.items():
         for o, entries in items:
             task_orders = []
@@ -642,23 +722,26 @@ def resolve_cancel_task(
 
 @router.get("/history")
 def picker_history(
-    limit: int = 30,
+    limit: int = 50,
+    session_id: int | None = None,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """История завершённых задач сборщика (за последние 30 дней)."""
+    """История завершённых задач сборщика. Опционально — только за конкретную сессию."""
     username = user.get("username")
-    tasks = (
+    query = (
         db.query(models.PickerTask)
         .filter(
             models.PickerTask.picker_username == username,
             models.PickerTask.status == "done",
             models.PickerTask.task_type != "CANCEL",
         )
-        .order_by(models.PickerTask.completed_at.desc())
-        .limit(limit)
-        .all()
     )
+    if session_id is not None:
+        sess = db.get(models.PickerSession, session_id)
+        if sess and sess.username == username:
+            query = query.filter(models.PickerTask.completed_at >= sess.started_at)
+    tasks = query.order_by(models.PickerTask.completed_at.desc()).limit(limit).all()
     result = []
     for t in tasks:
         td = _task_dict(t)

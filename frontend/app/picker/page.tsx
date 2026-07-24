@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { picker, PickerTask, MySessionResponse, loadUser } from "@/lib/api";
+import { picker, PickerTask, PickerOrderItem, MySessionResponse, loadUser } from "@/lib/api";
 
 type HistoryTask = PickerTask & { pdf_filename: string | null };
 
@@ -22,6 +22,18 @@ function taskStatusLabel(t: PickerTask) {
   return "Не начато";
 }
 
+function toKZTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  return d.toLocaleString("ru-RU", {
+    timeZone: "Asia/Almaty",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function PickerPage() {
   const router = useRouter();
   const [data, setData] = useState<MySessionResponse | null>(null);
@@ -33,6 +45,15 @@ export default function PickerPage() {
   const [history, setHistory] = useState<HistoryTask[]>([]);
   const [reprinting, setReprinting] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<"tasks" | "history">("tasks");
+  const [historySearch, setHistorySearch] = useState("");
+
+  const loadHistory = useCallback(async (sessionId?: number) => {
+    try {
+      const resp = await picker.history(sessionId);
+      setHistory(resp.tasks);
+    } catch {}
+  }, []);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -53,8 +74,6 @@ export default function PickerPage() {
     if (!u) { router.replace("/login"); return; }
     setUsername(u.username);
     load();
-    loadHistory();
-    // Автообновление каждые 30 сек (новые задачи могут появиться)
     const interval = setInterval(load, 30_000);
     return () => clearInterval(interval);
   }, [router, load]);
@@ -70,13 +89,6 @@ export default function PickerPage() {
     } finally {
       setStarting(false);
     }
-  }
-
-  async function loadHistory() {
-    try {
-      const resp = await picker.history();
-      setHistory(resp.tasks);
-    } catch {}
   }
 
   async function handleReprint(taskId: number) {
@@ -103,6 +115,11 @@ export default function PickerPage() {
     }
   }
 
+  function handleTabHistory() {
+    setTab("history");
+    loadHistory(data?.session?.id ?? undefined);
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -126,6 +143,12 @@ export default function PickerPage() {
   const inProgressTasks = sortTasks(tasks.filter(t => t.scanned_qty > 0 && t.scanned_qty < t.total_orders));
   const doneTasks = sortTasks(tasks.filter(t => t.scanned_qty === t.total_orders));
 
+  const filteredHistory = history.filter(t =>
+    !historySearch ||
+    (t.product_name ?? "").toLowerCase().includes(historySearch.toLowerCase()) ||
+    t.orders.some((o: PickerOrderItem) => o.order_code.includes(historySearch))
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 pb-10">
       {/* Header */}
@@ -137,15 +160,41 @@ export default function PickerPage() {
               {username && <p className="text-xs text-gray-500">{username}</p>}
               {inSession && (
                 <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 font-medium">
-                  ● сессия активна
+                  сессия активна
                 </span>
               )}
             </div>
           </div>
           <button onClick={() => router.push("/")} className="text-sm text-blue-600">
-            ← Назад
+            Назад
           </button>
         </div>
+
+        {/* Вкладки — только в сессии */}
+        {inSession && (
+          <div className="max-w-2xl mx-auto px-4 pb-0 flex gap-0 border-t">
+            <button
+              onClick={() => setTab("tasks")}
+              className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+                tab === "tasks"
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              Задания ({tasks.length})
+            </button>
+            <button
+              onClick={handleTabHistory}
+              className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+                tab === "history"
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              История{history.length > 0 ? ` (${history.length})` : ""}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="max-w-2xl mx-auto px-4 pt-4 space-y-4">
@@ -176,16 +225,13 @@ export default function PickerPage() {
         )}
 
         {/* ── Активная сессия ── */}
-        {inSession && (
+        {inSession && tab === "tasks" && (
           <>
             {/* Статус сессии */}
             <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-green-800">Сессия активна</p>
-                <p className="text-xs text-green-600">
-                  {activeSessions} чел. в сессии · {tasks.length} задани{tasks.length === 1 ? "е" : tasks.length < 5 ? "я" : "й"} назначено
-                </p>
-              </div>
+              <p className="text-xs text-green-600">
+                {activeSessions} чел. в сессии · {tasks.length} задани{tasks.length === 1 ? "е" : tasks.length < 5 ? "я" : "й"}
+              </p>
               <button
                 onClick={() => load(true)}
                 disabled={refreshing}
@@ -195,42 +241,10 @@ export default function PickerPage() {
               </button>
             </div>
 
-            {/* История сборок */}
-            {history.length > 0 && (
-              <section className="space-y-2">
-                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">История сборок ({history.length})</h2>
-                {history.map(t => (
-                  <div key={t.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3 flex items-start gap-3">
-                    <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 mt-0.5 ${
-                      t.task_type === "A" ? "bg-purple-100 text-purple-700"
-                      : t.task_type === "C" ? "bg-orange-100 text-orange-700"
-                      : "bg-blue-100 text-blue-700"
-                    }`}>{t.task_type}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 leading-tight truncate">{t.product_name ?? "—"}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        #{t.id} · {t.total_orders} позиц.
-                        {t.completed_at && ` · ${new Date(t.completed_at).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}`}
-                      </p>
-                    </div>
-                    {t.pdf_filename && (
-                      <button
-                        onClick={() => handleReprint(t.id)}
-                        disabled={reprinting === t.id}
-                        className="shrink-0 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-40"
-                      >
-                        {reprinting === t.id ? "…" : "Печать"}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </section>
-            )}
-
             {tasks.length === 0 && (
               <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-8 text-center">
                 <p className="text-gray-400 text-sm">Нет назначенных заданий</p>
-                <p className="text-gray-400 text-xs mt-1">Подождите — заказы распределятся при создании накладных</p>
+                <p className="text-gray-400 text-xs mt-1">Подождите — задания появятся при создании накладных</p>
               </div>
             )}
 
@@ -258,7 +272,6 @@ export default function PickerPage() {
               </section>
             )}
 
-            {/* Кнопка завершения сессии */}
             <button
               onClick={handleEndSession}
               disabled={ending}
@@ -266,6 +279,63 @@ export default function PickerPage() {
             >
               {ending ? "Завершение…" : "Завершить сессию"}
             </button>
+          </>
+        )}
+
+        {/* ── Вкладка История ── */}
+        {inSession && tab === "history" && (
+          <>
+            <div className="relative">
+              <input
+                type="search"
+                placeholder="Поиск по названию или номеру заказа…"
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-400"
+              />
+            </div>
+
+            {filteredHistory.length === 0 && (
+              <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-8 text-center">
+                <p className="text-gray-400 text-sm">
+                  {historySearch ? "Ничего не найдено" : "Завершённых заданий пока нет"}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {filteredHistory.map(t => {
+                const orderCodes = [...new Set(t.orders.map((o: PickerOrderItem) => o.order_code))];
+                return (
+                  <div key={t.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3 flex items-start gap-3">
+                    <span className={`text-xs font-bold rounded px-1.5 py-0.5 shrink-0 mt-0.5 ${
+                      t.task_type === "A" ? "bg-purple-100 text-purple-700"
+                      : t.task_type === "C" ? "bg-orange-100 text-orange-700"
+                      : "bg-blue-100 text-blue-700"
+                    }`}>{t.task_type}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 leading-tight truncate">{t.product_name ?? "—"}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {orderCodes.slice(0, 2).join(", ")}{orderCodes.length > 2 ? ` +${orderCodes.length - 2}` : ""}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        #{t.id} · {t.total_orders} поз.
+                        {t.completed_at && ` · ${toKZTime(t.completed_at)}`}
+                      </p>
+                    </div>
+                    {t.pdf_filename && (
+                      <button
+                        onClick={() => handleReprint(t.id)}
+                        disabled={reprinting === t.id}
+                        className="shrink-0 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-40"
+                      >
+                        {reprinting === t.id ? "…" : "Печать"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
       </div>
