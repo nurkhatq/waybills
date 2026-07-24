@@ -187,7 +187,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
             offer_code=sku,
             product_name=f"[Набор] {kit_name}",
             orders_json=json.dumps(task_orders, ensure_ascii=False),
-            total_orders=len(task_orders),
+            total_orders=len(kit_items),  # уникальные Kaspi-заказы, не позиции компонентов
             total_qty=sum(t["quantity"] for t in task_orders),
             waybill_job_id=job_id,
         ))
@@ -577,13 +577,25 @@ def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
 
 def _count_scanned(task: models.PickerTask) -> int:
     orders_list = json.loads(task.orders_json or "[]")
-    qty_map = {(o["order_code"], o.get("position_index", 0)): o.get("quantity", 1) for o in orders_list}
+
+    # Группируем позиции по order_code
+    from collections import defaultdict as _dd
+    order_positions: dict = _dd(list)
+    for o in orders_list:
+        order_positions[o["order_code"]].append(o)
+
+    scan_qty_map = {
+        (s.order_code, getattr(s, "position_index", 0)): getattr(s, "quantity_scanned", 1)
+        for s in task.scans if s.match_status != "skipped"
+    }
+
+    # Заказ считается выполненным когда все его позиции отсканированы
     count = 0
-    for s in task.scans:
-        if s.match_status == "skipped":
-            continue
-        required = qty_map.get((s.order_code, getattr(s, "position_index", 0)), 1)
-        if getattr(s, "quantity_scanned", 1) >= required:
+    for code, positions in order_positions.items():
+        if all(
+            scan_qty_map.get((p["order_code"], p.get("position_index", 0)), 0) >= p.get("quantity", 1)
+            for p in positions
+        ):
             count += 1
     return count
 
