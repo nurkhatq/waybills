@@ -78,6 +78,24 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     if not orders_db:
         return 0
 
+    # Удаляем незапущенные задачи от старых job-ов этого города —
+    # иначе сборщики видят задачи от предыдущей накладной, а не от новой.
+    old_pending = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.status.in_(["pending", "claimed"]),
+            models.PickerTask.scanned_qty == 0,
+            models.PickerTask.waybill_job_id != job_id,
+        )
+        .all()
+    )
+    for t in old_pending:
+        db.delete(t)
+    if old_pending:
+        db.commit()
+        logger.info(f"picker: удалено {len(old_pending)} незапущенных задач от старых job-ов для {city}")
+
     # Чистим устаревшие PDF накладных для этого job — при пересоздании задач
     # SQLite переиспользует ID (без AUTOINCREMENT), и старый picker_N.pdf может
     # достаться новой задаче с тем же N → os.path.exists() вернёт True и отдаст чужой PDF.
