@@ -349,14 +349,16 @@ def _finalize_pdfs(db, job, batches, labels: dict = None):
 
     # Автоматически создаём picker tasks из этих же заказов
     try:
+        # Удаляем все незавершённые задачи города (pending + claimed) —
+        # новый job означает новую партию, старые задачи устарели.
         db.query(models.PickerTask).filter(
             models.PickerTask.city == job.city,
-            models.PickerTask.status == "pending",
+            models.PickerTask.status.in_(["pending", "claimed"]),
         ).delete()
         db.commit()
         build_picker_tasks_from_job(job.id, job.city, db)
     except Exception as e:
-        logger.warning(f"build_picker_tasks_from_job failed for job {job.id}: {e}")
+        logger.exception(f"build_picker_tasks_from_job failed for job {job.id}: {e}")
 
 
 # Smart-mode: генерация PDF после выбора пользователя
