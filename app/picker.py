@@ -260,7 +260,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                 offer_code=o.primary_sku or sku,
                 product_name=display_name,
                 orders_json=json.dumps(task_orders, ensure_ascii=False),
-                total_orders=len(task_orders),
+                total_orders=1,  # один Kaspi-заказ (позиции — не отдельные заказы)
                 total_qty=sum(item["quantity"] for item in task_orders),
                 waybill_job_id=job_id,
             ))
