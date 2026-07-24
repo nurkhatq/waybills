@@ -32,8 +32,10 @@ export default function PickerPage() {
   const [username, setUsername] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryTask[]>([]);
   const [reprinting, setReprinting] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (manual = false) => {
+    if (manual) setRefreshing(true);
     try {
       const resp = await picker.mySession();
       setData(resp);
@@ -42,6 +44,7 @@ export default function PickerPage() {
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
     } finally {
       setLoading(false);
+      if (manual) setRefreshing(false);
     }
   }, []);
 
@@ -184,10 +187,11 @@ export default function PickerPage() {
                 </p>
               </div>
               <button
-                onClick={load}
-                className="text-xs text-green-700 underline"
+                onClick={() => load(true)}
+                disabled={refreshing}
+                className="text-xs text-green-700 underline disabled:opacity-50"
               >
-                Обновить
+                {refreshing ? "Обновляется…" : "Обновить"}
               </button>
             </div>
 
