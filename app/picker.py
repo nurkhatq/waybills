@@ -514,30 +514,49 @@ def _active_sessions(city: str, db: Session) -> list:
 
 
 def _redistribute_tasks(city: str, db: Session) -> int:
-    """Round-robin: раздать/перебалансировать незапущенные задачи между активными сессиями."""
+    """Round-robin: раздать незапущенные задачи между активными сессиями.
+    Трогаем только:
+    - pending задачи (нет владельца),
+    - claimed задачи чей владелец уже НЕ в активной сессии (orphaned).
+    Задачи активных сборщиков не перераспределяем — иначе один заберёт чужое.
+    """
     sessions = _active_sessions(city, db)
     if not sessions:
         return 0
-    # Пул = pending + claimed-незапущенные (scanned_qty == 0)
-    # Так второй сборщик получает задачи даже когда всё уже claimed первым
-    pool = (
+    active_usernames = {s.username for s in sessions}
+
+    # Pending (нет владельца)
+    pending = (
         db.query(models.PickerTask)
         .filter(
             models.PickerTask.city == city,
-            models.PickerTask.status.in_(["pending", "claimed"]),
-            models.PickerTask.scanned_qty == 0,
+            models.PickerTask.status == "pending",
         )
         .order_by(models.PickerTask.id)
         .all()
     )
+    # Claimed у тех, кто уже завершил сессию (orphaned)
+    orphaned = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.status == "claimed",
+            models.PickerTask.scanned_qty == 0,
+            ~models.PickerTask.picker_username.in_(list(active_usernames)),
+        )
+        .order_by(models.PickerTask.id)
+        .all()
+    )
+    pool = pending + orphaned
+    if not pool:
+        return 0
     n = len(sessions)
     for i, task in enumerate(pool):
         s = sessions[i % n]
         task.picker_username = s.username
         task.status = "claimed"
         task.claimed_at = datetime.now(timezone.utc)
-    if pool:
-        db.commit()
+    db.commit()
     return len(pool)
 
 
