@@ -889,6 +889,7 @@ def record_scan(
         ))
 
     db.flush()
+    db.expire(task, ['scans'])  # сбрасываем кэш scans чтобы _count_scanned видел новый скан
     task.scanned_qty = _count_scanned(task)
     db.commit()
     db.refresh(task)
@@ -941,6 +942,7 @@ def bulk_scan(
         ))
 
     db.flush()
+    db.expire(task, ['scans'])
     task.scanned_qty = _count_scanned(task)
     db.commit()
     db.refresh(task)
