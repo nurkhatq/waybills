@@ -12,7 +12,7 @@ import { api, picker, PrintJob, loadUser } from "@/lib/api";
  */
 
 const POLL_INTERVAL_MS = 1_000;
-const PRINT_COOLDOWN_MS = 20_000; // ждём после window.print() перед следующим
+const PRINT_COOLDOWN_MS = 10_000; // ждём после window.print() перед следующим
 
 const CITIES = [
   { key: "almaty", label: "Алматы" },
@@ -33,6 +33,7 @@ export default function PrintStationPage() {
 
   const busyRef = useRef(false);
   const cityRef = useRef("");
+  const prefetchRef = useRef<{ jobId: number; blobUrl: string } | null>(null);
 
   useEffect(() => {
     const u = loadUser();
@@ -77,24 +78,45 @@ export default function PrintStationPage() {
   useEffect(() => {
     if (busyRef.current || queue.length === 0) return;
     const job = queue[0];
-    processPrint(job);
+    processPrint(job, queue);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue]);
 
-  async function processPrint(job: PrintJob) {
+  async function processPrint(job: PrintJob, queue: PrintJob[]) {
     if (busyRef.current) return;
     busyRef.current = true;
     setPrinting(job);
 
     try {
-      // Пытаемся вернуть фокус на окно перед печатью
       window.focus();
-      await api.printPdf(job.waybill_job_id, job.filename);
+
+      // Берём prefetch-blob если он уже скачан для этого job
+      let blobUrl: string | null = null;
+      if (prefetchRef.current?.jobId === job.id) {
+        blobUrl = prefetchRef.current.blobUrl;
+        prefetchRef.current = null;
+      } else {
+        if (prefetchRef.current) {
+          URL.revokeObjectURL(prefetchRef.current.blobUrl);
+          prefetchRef.current = null;
+        }
+        blobUrl = await api.fetchPdfBlob(job.waybill_job_id, job.filename);
+      }
+
+      // Начинаем prefetch следующего PDF пока печатаем текущий
+      const nextJob = queue.find(j => j.id !== job.id);
+      if (nextJob) {
+        api.fetchPdfBlob(nextJob.waybill_job_id, nextJob.filename)
+          .then(url => { prefetchRef.current = { jobId: nextJob.id, blobUrl: url }; })
+          .catch(() => {});
+      }
+
+      await api.printBlobUrl(blobUrl);
     } catch (e) {
       setError(`Ошибка печати ${job.filename}: ${e instanceof Error ? e.message : e}`);
     }
 
-    // Небольшая пауза чтобы принтер успел принять задание
+    // Пауза чтобы принтер успел принять задание
     await new Promise(r => setTimeout(r, PRINT_COOLDOWN_MS));
 
     try {

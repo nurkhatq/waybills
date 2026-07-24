@@ -202,14 +202,17 @@ export const api = {
   pdfUrl: (jobId: number, filename: string) =>
     `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`,
 
-  printPdf: async (jobId: number, filename: string): Promise<void> => {
+  // Скачать PDF и вернуть blobUrl — можно вызвать заранее (prefetch)
+  fetchPdfBlob: async (jobId: number, filename: string): Promise<string> => {
     const url = `${BASE}/jobs/${jobId}/pdf/${filename}?token=${getToken()}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    return URL.createObjectURL(blob);
+  },
 
-    // Iframe на весь экран — Chrome PDF viewer рендерит все страницы только при полном размере
+  // Напечатать уже скачанный blob (без сетевого ожидания)
+  printBlobUrl: async (blobUrl: string): Promise<void> => {
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;border:none;";
     iframe.src = blobUrl;
@@ -217,7 +220,6 @@ export const api = {
 
     await new Promise<void>((resolve, reject) => {
       iframe.onload = () => {
-        // Доп. пауза чтобы PDF viewer отрендерил все страницы
         setTimeout(() => {
           try {
             iframe.contentWindow?.focus();
@@ -226,7 +228,7 @@ export const api = {
           } catch (e) {
             reject(e);
           }
-        }, 1500);
+        }, 700); // 700ms достаточно для рендера 1-2 страниц
       };
       iframe.onerror = () => reject(new Error("Не удалось загрузить PDF"));
       setTimeout(() => reject(new Error("Таймаут загрузки PDF")), 30_000);
@@ -236,6 +238,11 @@ export const api = {
       try { document.body.removeChild(iframe); } catch {}
       URL.revokeObjectURL(blobUrl);
     }, 30_000);
+  },
+
+  printPdf: async (jobId: number, filename: string): Promise<void> => {
+    const blobUrl = await api.fetchPdfBlob(jobId, filename);
+    await api.printBlobUrl(blobUrl);
   },
 };
 
