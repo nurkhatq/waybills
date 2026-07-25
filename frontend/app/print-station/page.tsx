@@ -11,8 +11,9 @@ import { api, picker, PrintJob, loadUser } from "@/lib/api";
  *   chrome.exe --kiosk-printing http://<SITE>/print-station
  */
 
-const POLL_INTERVAL_MS = 1_000;
-const PRINT_COOLDOWN_MS = 10_000; // ждём после window.print() перед следующим
+const POLL_ACTIVE_MS  = 500;   // сборщики работают — опрашиваем быстро
+const POLL_IDLE_MS    = 2_000; // очередь пуста — медленно
+const PRINT_COOLDOWN_MS = 10_000;
 
 const CITIES = [
   { key: "almaty", label: "Алматы" },
@@ -33,7 +34,8 @@ export default function PrintStationPage() {
 
   const busyRef = useRef(false);
   const cityRef = useRef("");
-  const prefetchRef = useRef<{ jobId: number; blobUrl: string } | null>(null);
+  // jobId → предзагруженный blobUrl; очищается когда job уходит из queue или компонент размонтируется
+  const blobCacheRef = useRef<Map<number, string>>(new Map());
 
   useEffect(() => {
     const u = loadUser();
@@ -66,13 +68,46 @@ export default function PrintStationPage() {
     }
   }, []);
 
-  // Polling
+  // Предзагрузка: при каждом обновлении queue качаем новые PDF, чистим старые
+  useEffect(() => {
+    const cache = blobCacheRef.current;
+    const queueIds = new Set(queue.map(j => j.id));
+
+    // Удаляем blob'ы для job'ов которых больше нет в очереди
+    for (const [id, url] of cache.entries()) {
+      if (!queueIds.has(id)) {
+        URL.revokeObjectURL(url);
+        cache.delete(id);
+      }
+    }
+
+    // Качаем blob'ы для новых job'ов (не мешаем текущей печати)
+    for (const job of queue) {
+      if (!cache.has(job.id)) {
+        api.fetchPdfBlob(job.waybill_job_id, job.filename)
+          .then(url => { cache.set(job.id, url); })
+          .catch(() => {}); // если не получилось — processPrint скачает сам
+      }
+    }
+  }, [queue]);
+
+  // Cleanup при размонтировании (закрыл вкладку/браузер)
+  useEffect(() => {
+    return () => {
+      for (const url of blobCacheRef.current.values()) URL.revokeObjectURL(url);
+      blobCacheRef.current.clear();
+    };
+  }, []);
+
+  // Polling — 500мс когда активны, 2с когда idle
+  const isActive = queue.length > 0 || !!printing;
   useEffect(() => {
     if (!city) return;
     poll();
-    const id = setInterval(poll, POLL_INTERVAL_MS);
+    const id = setInterval(poll, isActive ? POLL_ACTIVE_MS : POLL_IDLE_MS);
     return () => clearInterval(id);
-  }, [city, poll]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [city, poll, isActive]);
 
   // Print processor — берём по одному из очереди
   useEffect(() => {
@@ -90,26 +125,11 @@ export default function PrintStationPage() {
     try {
       window.focus();
 
-      // Берём prefetch-blob если он уже скачан для этого job
-      let blobUrl: string | null = null;
-      if (prefetchRef.current?.jobId === job.id) {
-        blobUrl = prefetchRef.current.blobUrl;
-        prefetchRef.current = null;
-      } else {
-        if (prefetchRef.current) {
-          URL.revokeObjectURL(prefetchRef.current.blobUrl);
-          prefetchRef.current = null;
-        }
-        blobUrl = await api.fetchPdfBlob(job.waybill_job_id, job.filename);
-      }
-
-      // Начинаем prefetch следующего PDF пока печатаем текущий
-      const nextJob = queue.find(j => j.id !== job.id);
-      if (nextJob) {
-        api.fetchPdfBlob(nextJob.waybill_job_id, nextJob.filename)
-          .then(url => { prefetchRef.current = { jobId: nextJob.id, blobUrl: url }; })
-          .catch(() => {});
-      }
+      // Берём предзагруженный blob из кэша (уже готов) или скачиваем как fallback
+      const cache = blobCacheRef.current;
+      const cached = cache.get(job.id) ?? null;
+      cache.delete(job.id); // убираем из кэша — printBlobUrl сам revoke сделает после печати
+      const blobUrl = cached ?? await api.fetchPdfBlob(job.waybill_job_id, job.filename);
 
       await api.printBlobUrl(blobUrl);
     } catch (e) {
