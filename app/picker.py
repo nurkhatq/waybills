@@ -136,18 +136,20 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
         return result
 
     # Комплекты → тип C (каждый компонент = отдельная позиция для скана)
+    # Заказы с qty=1 группируются вместе; заказы с qty>1 — каждый в отдельную задачу
     for sku, kit_items in kit_groups.items():
         first_info = kit_items[0][2] if kit_items else {}
         components = first_info.get("components", [])
         kit_name = first_info.get("name", sku)
 
-        if components:
-            # Одна C-задача: все заказы × все компоненты как позиции
-            # Если покупатель заказал total_qty наборов — quantity каждого компонента × total_qty
+        # Разбиваем на группы: qty=1 вместе, каждый qty>1 отдельно
+        single_qty_items = [(o, e, i) for o, e, i in kit_items if (o.total_qty or 1) == 1]
+        multi_qty_items  = [(o, e, i) for o, e, i in kit_items if (o.total_qty or 1) > 1]
+
+        def _make_kit_task_orders(items, n_comp):
             task_orders = []
-            n_comp = len(components)
-            for o, entries, info in kit_items:
-                kit_qty = o.total_qty or 1  # сколько наборов заказано
+            for o, entries, info in items:
+                kit_qty = o.total_qty or 1
                 for ci, comp in enumerate(components):
                     comp_sku = comp.get("sku", "")
                     comp_info = inv.product_info(comp_sku) if comp_sku else {}
@@ -164,10 +166,11 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                         "images": first_info.get("images", []) if ci == 0 else [],
                         "num_positions": n_comp,
                     })
-        else:
-            # Компоненты не описаны — скан штрихкода самого набора
+            return task_orders
+
+        def _make_kit_task_orders_no_comp(items):
             task_orders = []
-            for o, entries, info in kit_items:
+            for o, entries, info in items:
                 first_entry = entries[0] if entries else {}
                 name = (first_entry.get("offer") or {}).get("name", "") or kit_name
                 offer_code = (first_entry.get("offer") or {}).get("code", "") or sku
@@ -182,18 +185,35 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                     "components": [],
                     "images": first_info.get("images", []),
                 })
+            return task_orders
 
-        db.add(models.PickerTask(
-            city=city,
-            task_type="C",
-            offer_code=sku,
-            product_name=f"[Набор] {kit_name}",
-            orders_json=json.dumps(task_orders, ensure_ascii=False),
-            total_orders=len(kit_items),  # уникальные Kaspi-заказы, не позиции компонентов
-            total_qty=sum(t["quantity"] for t in task_orders),
-            waybill_job_id=job_id,
-        ))
-        created += 1
+        def _add_kit_task(items, label=""):
+            if not items:
+                return 0
+            if components:
+                task_orders = _make_kit_task_orders(items, len(components))
+            else:
+                task_orders = _make_kit_task_orders_no_comp(items)
+            if not task_orders:
+                return 0
+            name = f"[Набор] {kit_name}" + (f" ×{items[0][0].total_qty}" if label else "")
+            db.add(models.PickerTask(
+                city=city,
+                task_type="C",
+                offer_code=sku,
+                product_name=name,
+                orders_json=json.dumps(task_orders, ensure_ascii=False),
+                total_orders=len(items),
+                total_qty=sum(t["quantity"] for t in task_orders),
+                waybill_job_id=job_id,
+            ))
+            return 1
+
+        # qty=1 заказы — одна задача
+        created += _add_kit_task(single_qty_items)
+        # qty>1 заказы — каждый отдельно
+        for item in multi_qty_items:
+            created += _add_kit_task([item], label=True)
 
     # Одиночные заказы qty=1 → A (5+ заказов) или B (1-4 заказа)
     for sku, items in single_groups.items():
