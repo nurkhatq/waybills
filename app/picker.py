@@ -143,9 +143,11 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
 
         if components:
             # Одна C-задача: все заказы × все компоненты как позиции
+            # Если покупатель заказал total_qty наборов — quantity каждого компонента × total_qty
             task_orders = []
             n_comp = len(components)
             for o, entries, info in kit_items:
+                kit_qty = o.total_qty or 1  # сколько наборов заказано
                 for ci, comp in enumerate(components):
                     comp_sku = comp.get("sku", "")
                     comp_info = inv.product_info(comp_sku) if comp_sku else {}
@@ -155,7 +157,7 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
                         "kaspi_order_id": None,
                         "offer_code": comp_sku or sku,
                         "name": comp.get("name", "Компонент"),
-                        "quantity": comp.get("qty", 1),
+                        "quantity": comp.get("qty", 1) * kit_qty,
                         "expected_barcode": comp_info.get("barcode"),
                         "is_kit": False,
                         "components": [],
@@ -234,25 +236,48 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
     for sku, items in multi_groups.items():
         for o, entries in items:
             task_orders = []
-            for pos_idx, entry in enumerate(entries):
+            pos_idx = 0
+            for entry in entries:
                 offer = entry.get("offer") or {}
                 offer_code = offer.get("code", "") or sku
                 name = offer.get("name", "") or sku
                 entry_info = inv.product_info(inv.resolve(offer_code)) if offer_code else {"barcode": None, "is_kit": False, "components": []}
                 qty = entry.get("quantity", 1)
-                task_orders.append({
-                    "order_code": o.order_code,
-                    "position_index": pos_idx,
-                    "kaspi_order_id": None,
-                    "offer_code": offer_code,
-                    "name": name,
-                    "quantity": qty,
-                    "expected_barcode": entry_info.get("barcode"),
-                    "is_kit": entry_info.get("is_kit", False),
-                    "components": entry_info.get("components", []),
-                    "images": entry_info.get("images", []),
-                    "num_positions": o.num_positions,
-                })
+                entry_components = entry_info.get("components", [])
+                if entry_info.get("is_kit") and entry_components:
+                    # Позиция сама является набором — раскрываем компоненты
+                    for comp in entry_components:
+                        comp_sku = comp.get("sku", "")
+                        comp_info = inv.product_info(comp_sku) if comp_sku else {}
+                        task_orders.append({
+                            "order_code": o.order_code,
+                            "position_index": pos_idx,
+                            "kaspi_order_id": None,
+                            "offer_code": comp_sku or offer_code,
+                            "name": comp.get("name", name),
+                            "quantity": comp.get("qty", 1) * qty,
+                            "expected_barcode": comp_info.get("barcode"),
+                            "is_kit": False,
+                            "components": [],
+                            "images": entry_info.get("images", []) if pos_idx == 0 else [],
+                            "num_positions": o.num_positions,
+                        })
+                        pos_idx += 1
+                else:
+                    task_orders.append({
+                        "order_code": o.order_code,
+                        "position_index": pos_idx,
+                        "kaspi_order_id": None,
+                        "offer_code": offer_code,
+                        "name": name,
+                        "quantity": qty,
+                        "expected_barcode": entry_info.get("barcode"),
+                        "is_kit": False,
+                        "components": [],
+                        "images": entry_info.get("images", []),
+                        "num_positions": o.num_positions,
+                    })
+                    pos_idx += 1
             display_name = task_orders[0]["name"] if task_orders else sku
             db.add(models.PickerTask(
                 city=city,
@@ -1100,13 +1125,17 @@ def complete_task(
             task.orders_json = json.dumps(orders_list, ensure_ascii=False)  # восстанавливаем
             if fname:
                 pdf_filenames = [fname]
-                db.add(models.PickerPrintJob(
-                    city=task.city,
-                    waybill_job_id=task.waybill_job_id,
-                    filename=fname,
-                    picker_task_id=task_id,
-                ))
-                db.commit()
+                already = db.query(models.PickerPrintJob).filter(
+                    models.PickerPrintJob.picker_task_id == task_id,
+                ).first()
+                if not already:
+                    db.add(models.PickerPrintJob(
+                        city=task.city,
+                        waybill_job_id=task.waybill_job_id,
+                        filename=fname,
+                        picker_task_id=task_id,
+                    ))
+                    db.commit()
         except Exception as e:
             logger.warning(f"picker_pdf build failed for task {task_id}: {e}")
 
