@@ -371,6 +371,9 @@ export const picker = {
 
   printQueue: (city: string) => req<PrintJob[]>(`/picker/print-queue?city=${city}`),
 
+  prefetchPdfs: (city: string) =>
+    req<{ waybill_job_id: number; filename: string }[]>(`/picker/prefetch-pdfs?city=${city}`),
+
   printJobDone: (jobId: number) =>
     req<{ done: boolean }>(`/picker/print-jobs/${jobId}/done`, { method: "POST" }),
 

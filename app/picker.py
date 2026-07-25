@@ -267,6 +267,22 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
             created += 1
 
     db.commit()
+
+    # Пребилдим все picker PDF сразу — пока сборщики работают, файлы уже готовы
+    prebuild_tasks = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.waybill_job_id == job_id,
+        )
+        .all()
+    )
+    for t in prebuild_tasks:
+        try:
+            _build_picker_pdf(t, db)
+        except Exception as e:
+            logger.warning(f"picker: pre-build PDF failed task {t.id}: {e}")
+
     _redistribute_tasks(city, db)
     logger.info(f"picker: built {created} waybill tasks for {city} from job {job_id}")
     return created
@@ -1242,6 +1258,46 @@ def my_session(
         "tasks": [_task_dict(t) for t in tasks],
         "active_sessions_count": active_count,
     }
+
+
+@router.get("/prefetch-pdfs")
+def get_prefetch_pdfs(
+    city: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Список уже готовых picker PDF для предзагрузки принт-станцией."""
+    # Находим последний активный waybill_job_id для города
+    latest = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.waybill_job_id.isnot(None),
+            models.PickerTask.status != "done",
+        )
+        .order_by(models.PickerTask.id.desc())
+        .first()
+    )
+    if not latest:
+        return []
+
+    job_id = latest.waybill_job_id
+    tasks = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.waybill_job_id == job_id,
+        )
+        .all()
+    )
+
+    result = []
+    for t in tasks:
+        filename = f"picker_{t.id}.pdf"
+        pdf_path = os.path.join(settings.data_dir, str(job_id), filename)
+        if os.path.exists(pdf_path):
+            result.append({"waybill_job_id": job_id, "filename": filename})
+    return result
 
 
 @router.get("/print-queue")

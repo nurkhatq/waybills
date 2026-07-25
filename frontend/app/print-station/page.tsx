@@ -34,13 +34,12 @@ export default function PrintStationPage() {
 
   const busyRef = useRef(false);
   const cityRef = useRef("");
-  // jobId → предзагруженный blobUrl; очищается когда job уходит из queue или компонент размонтируется
-  const blobCacheRef = useRef<Map<number, string>>(new Map());
+  // filename → предзагруженный blobUrl (ключ = filename, он уникален: picker_{task_id}.pdf)
+  const blobCacheRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const u = loadUser();
     if (!u) { router.replace("/login"); return; }
-    // Приоритет: сохранённый выбор → город пользователя
     const saved = localStorage.getItem(LS_CITY_KEY) || u.city;
     setCity(saved);
     cityRef.current = saved;
@@ -68,25 +67,35 @@ export default function PrintStationPage() {
     }
   }, []);
 
-  // Предзагрузка: при каждом обновлении queue качаем новые PDF, чистим старые
+  // При старте (и смене города) — предзагружаем ВСЕ PDF текущего джоба разом
+  useEffect(() => {
+    if (!city) return;
+    // Чистим кэш предыдущего города
+    for (const url of blobCacheRef.current.values()) URL.revokeObjectURL(url);
+    blobCacheRef.current.clear();
+
+    let cancelled = false;
+    picker.prefetchPdfs(city).then(items => {
+      if (cancelled) return;
+      for (const item of items) {
+        if (!blobCacheRef.current.has(item.filename)) {
+          api.fetchPdfBlob(item.waybill_job_id, item.filename)
+            .then(url => { if (!cancelled) blobCacheRef.current.set(item.filename, url); })
+            .catch(() => {});
+        }
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [city]);
+
+  // Fallback: докачиваем blob если он ещё не готов когда job появился в очереди
   useEffect(() => {
     const cache = blobCacheRef.current;
-    const queueIds = new Set(queue.map(j => j.id));
-
-    // Удаляем blob'ы для job'ов которых больше нет в очереди
-    for (const [id, url] of cache.entries()) {
-      if (!queueIds.has(id)) {
-        URL.revokeObjectURL(url);
-        cache.delete(id);
-      }
-    }
-
-    // Качаем blob'ы для новых job'ов (не мешаем текущей печати)
     for (const job of queue) {
-      if (!cache.has(job.id)) {
+      if (!cache.has(job.filename)) {
         api.fetchPdfBlob(job.waybill_job_id, job.filename)
-          .then(url => { cache.set(job.id, url); })
-          .catch(() => {}); // если не получилось — processPrint скачает сам
+          .then(url => { cache.set(job.filename, url); })
+          .catch(() => {});
       }
     }
   }, [queue]);
@@ -127,8 +136,8 @@ export default function PrintStationPage() {
 
       // Берём предзагруженный blob из кэша (уже готов) или скачиваем как fallback
       const cache = blobCacheRef.current;
-      const cached = cache.get(job.id) ?? null;
-      cache.delete(job.id); // убираем из кэша — printBlobUrl сам revoke сделает после печати
+      const cached = cache.get(job.filename) ?? null;
+      cache.delete(job.filename); // убираем — printBlobUrl сам revoke сделает после печати
       const blobUrl = cached ?? await api.fetchPdfBlob(job.waybill_job_id, job.filename);
 
       await api.printBlobUrl(blobUrl);
