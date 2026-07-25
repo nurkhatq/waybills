@@ -513,19 +513,21 @@ def _active_sessions(city: str, db: Session) -> list:
     )
 
 
-def _redistribute_tasks(city: str, db: Session) -> int:
+def _redistribute_tasks(city: str, db: Session, rebalance: bool = False) -> int:
     """Round-robin: раздать незапущенные задачи между активными сессиями.
-    Трогаем только:
-    - pending задачи (нет владельца),
-    - claimed задачи чей владелец уже НЕ в активной сессии (orphaned).
-    Задачи активных сборщиков не перераспределяем — иначе один заберёт чужое.
+
+    rebalance=True (при старте новой сессии): включаем в пул все незапущенные
+    задачи активных сборщиков (scanned_qty==0) — чтобы новый сборщик получил
+    свою долю. Задачи в работе (scanned_qty>0) не трогаем никогда.
+
+    rebalance=False (обычная работа): трогаем только pending + orphaned,
+    чтобы не красть задачи у работающего сборщика.
     """
     sessions = _active_sessions(city, db)
     if not sessions:
         return 0
     active_usernames = {s.username for s in sessions}
 
-    # Pending (нет владельца)
     pending = (
         db.query(models.PickerTask)
         .filter(
@@ -535,7 +537,6 @@ def _redistribute_tasks(city: str, db: Session) -> int:
         .order_by(models.PickerTask.id)
         .all()
     )
-    # Claimed у тех, кто уже завершил сессию (orphaned)
     orphaned = (
         db.query(models.PickerTask)
         .filter(
@@ -548,6 +549,22 @@ def _redistribute_tasks(city: str, db: Session) -> int:
         .all()
     )
     pool = pending + orphaned
+
+    if rebalance:
+        # При старте новой сессии: добавляем незапущенные задачи активных сборщиков
+        unstarted = (
+            db.query(models.PickerTask)
+            .filter(
+                models.PickerTask.city == city,
+                models.PickerTask.status == "claimed",
+                models.PickerTask.scanned_qty == 0,
+                models.PickerTask.picker_username.in_(list(active_usernames)),
+            )
+            .order_by(models.PickerTask.id)
+            .all()
+        )
+        pool = pool + unstarted
+
     if not pool:
         return 0
     n = len(sessions)
@@ -1131,13 +1148,13 @@ def start_session(
         models.PickerSession.status == "active",
     ).first()
     if existing:
-        assigned = _redistribute_tasks(city, db)
+        assigned = _redistribute_tasks(city, db, rebalance=True)
         return {"session_id": existing.id, "assigned": assigned, "already_active": True}
 
     sess = models.PickerSession(username=username, city=city)
     db.add(sess)
     db.commit()
-    assigned = _redistribute_tasks(city, db)
+    assigned = _redistribute_tasks(city, db, rebalance=True)
     return {"session_id": sess.id, "assigned": assigned}
 
 
