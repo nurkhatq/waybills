@@ -336,20 +336,9 @@ def build_picker_tasks_from_job(job_id: int, city: str, db: Session) -> int:
 def build_picker_tasks(city: str, db: Session) -> int:
     """
     Строит picker_tasks из последнего AssemblyJob для города.
-    Если задания уже есть (pending/claimed) — не пересоздаёт.
+    Незапущенные задачи (scanned_qty==0) из старых джобов сбрасываются автоматически.
     Возвращает кол-во созданных задач.
     """
-    existing = (
-        db.query(models.PickerTask)
-        .filter(
-            models.PickerTask.city == city,
-            models.PickerTask.status.in_(["pending", "claimed"]),
-        )
-        .count()
-    )
-    if existing > 0:
-        return 0
-
     aj = (
         db.query(models.AssemblyJob)
         .filter(models.AssemblyJob.city == city, models.AssemblyJob.status == "ready")
@@ -366,6 +355,37 @@ def build_picker_tasks(city: str, db: Session) -> int:
     )
     if not orders:
         return 0
+
+    # Если для этого AssemblyJob задачи уже есть — не пересоздаём
+    # (waybill_job_id может не совпадать с aj.id, поэтому проверяем по pending/claimed
+    #  задачам, созданным после старта этого job)
+    existing_unstarted = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.status.in_(["pending", "claimed"]),
+            models.PickerTask.scanned_qty == 0,
+            models.PickerTask.created_at >= aj.created_at,
+        )
+        .count()
+    )
+    if existing_unstarted > 0:
+        return 0
+
+    # Сбрасываем незапущенные задачи из СТАРЫХ джобов — они устарели
+    old_unstarted = (
+        db.query(models.PickerTask)
+        .filter(
+            models.PickerTask.city == city,
+            models.PickerTask.status.in_(["pending", "claimed"]),
+            models.PickerTask.scanned_qty == 0,
+        )
+        .all()
+    )
+    for t in old_unstarted:
+        db.delete(t)
+    if old_unstarted:
+        db.commit()
 
     inv = get_inventory()
 
