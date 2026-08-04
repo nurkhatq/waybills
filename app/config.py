@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    kaspi_token: str = "Kv/vZG305UvNBHVGbgHouHCsAaCnewqrwTkNUj27gvs="
+    kaspi_token: str = ""
     kaspi_api_base: str = "https://kaspi.kz/shop/api/v2"
     kaspi_user_agent: str = "MyKaspiIntegration/1.0 (MyStore)"
     db_url: str = "sqlite:///./waybills.db"

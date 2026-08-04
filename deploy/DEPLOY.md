@@ -15,7 +15,7 @@ python3 -m venv .venv
 
 # 3. Создаём .env
 cat > /opt/waybills/.env <<EOF
-KASPI_TOKEN=Kv/vZG305UvNBHVGbgHouHCsAaCnewqrwTkNUj27gvs=
+KASPI_TOKEN=<реальный токен — взять из личного кабинета Kaspi, не коммитить>
 AGENT_TOKEN=$(openssl rand -hex 32)
 DATA_DIR=/opt/waybills/data
 DB_URL=sqlite:////opt/waybills/waybills.db
