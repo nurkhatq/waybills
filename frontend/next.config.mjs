@@ -1,4 +1,4 @@
-const VPS = process.env.VPS_API_URL ?? "http://194.238.41.18/waybills";
+const VPS = process.env.VPS_API_URL ?? "http://185.185.49.163/waybills";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
