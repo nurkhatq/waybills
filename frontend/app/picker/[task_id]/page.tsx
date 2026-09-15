@@ -99,6 +99,30 @@ export default function PickerTaskPage() {
     loadTask();
   }, [router, loadTask]);
 
+  /* Годится ли отсканированный код. Сверяем со ВСЕМ списком штрихкодов товара,
+     а не с одним «основным»: тот же товар приезжает в двух упаковках с разными
+     кодами, оба заведены в базе, и сборщик сканирует тот, что попался под руку.
+     Раньше второй код экран объявлял «неверным» (владелец 2026-09-15).
+     Пустой список = система штрихкода не знает — решает вызывающий. */
+  function barcodeFits(barcode: string, order: PickerOrderItem | null): boolean {
+    const known = [
+      ...(order?.expected_barcodes ?? []),
+      ...(task?.expected_barcodes ?? []),
+      order?.expected_barcode,
+      task?.expected_barcode,
+    ].filter(Boolean) as string[];
+    return known.includes(barcode);
+  }
+
+  function hasKnownBarcode(order: PickerOrderItem | null): boolean {
+    return Boolean(
+      order?.expected_barcode ||
+      task?.expected_barcode ||
+      (order?.expected_barcodes?.length ?? 0) > 0 ||
+      (task?.expected_barcodes?.length ?? 0) > 0,
+    );
+  }
+
   // ── PER-ORDER MODE ───────────────────────────────────────────────────────────
 
   async function handleScanPerOrder(barcode: string) {
@@ -106,15 +130,14 @@ export default function PickerTaskPage() {
     setScannerActive(false);
     setProcessing(true);
 
-    // Для типа A штрихкод хранится на уровне task, для B — в order item
-    const expected = currentOrder.expected_barcode ?? task.expected_barcode;
+    // Для типа A штрихкоды хранятся на уровне task, для B — в order item
     const isKit = (currentOrder as PickerOrderItem & { is_kit?: boolean }).is_kit;
 
     let status: ScanStatus = "matched";
-    if (!expected && !isKit) {
+    if (!hasKnownBarcode(currentOrder) && !isKit) {
       // Нет штрихкода в системе — записываем, откроем модал
       status = "unknown_barcode";
-    } else if (expected && barcode !== expected) {
+    } else if (!barcodeFits(barcode, currentOrder)) {
       // Не совпало — проверим через API
       try {
         const lookup = await picker.lookupBarcode(barcode);
@@ -180,11 +203,21 @@ export default function PickerTaskPage() {
   async function handleScanBulk(barcode: string) {
     if (!task || !scannerActive || processing) return;
 
-    // Сразу проверяем: если ожидаемый штрихкод известен и не совпал — говорим немедленно
-    const expected = task.expected_barcode;
-    if (expected && barcode !== expected) {
-      setBulkWrongBarcode(barcode);
-      return; // камеру не останавливаем — пусть попробует снова
+    // Сразу проверяем: код не из списка товара — спрашиваем систему и только
+    // потом ругаемся. Раньше здесь сравнивали с ОДНИМ штрихкодом и в справочник
+    // не заглядывали вовсе: второй код того же товара сразу объявлялся неверным.
+    if (!barcodeFits(barcode, null)) {
+      let fits = false;
+      try {
+        const lookup = await picker.lookupBarcode(barcode);
+        fits = Boolean(lookup.found) && lookup.main_sku === task.offer_code;
+      } catch {
+        fits = false; // справочник недоступен — не выдаём чужой товар за верный
+      }
+      if (!fits) {
+        setBulkWrongBarcode(barcode);
+        return; // камеру не останавливаем — пусть попробует снова
+      }
     }
 
     setBulkWrongBarcode(null);

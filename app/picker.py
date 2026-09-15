@@ -660,6 +660,17 @@ def _redistribute_tasks(city: str, db: Session, rebalance: bool = False) -> int:
 
 def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
     orders = json.loads(task.orders_json or "[]")
+    # Все штрихкоды товара, а не только основной. Один и тот же товар приезжает
+    # в двух упаковках с разными кодами (в базе заведены оба), и сборщик сканирует
+    # тот, что попался под руку — раньше второй код экран объявлял «неверным»
+    # (владелец 2026-09-15, товар 491 Dr. Althea 345 Relief).
+    # Считается НА ЧТЕНИИ из справочника, а не хранится в задании: список кодов
+    # правят в каталоге, и задание, собранное вчера, должно знать сегодняшний.
+    inv = get_inventory()
+    for o in orders:
+        sku = o.get("offer_code")
+        if sku:
+            o["expected_barcodes"] = inv.barcodes_for_sku(inv.resolve(sku))
     scan_map: dict[tuple, dict] = {}
     if include_scans:
         for s in (task.scans or []):
@@ -679,6 +690,9 @@ def _task_dict(task: models.PickerTask, include_scans: bool = False) -> dict:
         "offer_code": task.offer_code,
         "product_name": task.product_name,
         "expected_barcode": task.expected_barcode,
+        "expected_barcodes": (
+            inv.barcodes_for_sku(inv.resolve(task.offer_code)) if task.offer_code else []
+        ),
         "orders": orders,
         "total_orders": task.total_orders,
         "total_qty": task.total_qty,
