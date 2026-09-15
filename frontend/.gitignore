@@ -2,3 +2,10 @@
 node_modules/
 out/
 .env.local
+
+# Мусор сборки Next: tsconfig.tsbuildinfo и next-env.d.ts генерируются при
+# `npm run build`, package-lock.json — при `npm install`. В репозитории их не
+# было; один `git add -A` после локальной сборки утащил их в main (2026-09-15).
+*.tsbuildinfo
+next-env.d.ts
+package-lock.json
