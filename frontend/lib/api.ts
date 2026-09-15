@@ -262,6 +262,9 @@ export interface PickerOrderItem {
   name: string;
   quantity: number;
   expected_barcode?: string | null;
+  /* Все штрихкоды товара: он приходит в разных упаковках, и в базе заведены
+     оба кода — сборщику годится любой (владелец 2026-09-15). */
+  expected_barcodes?: string[];
   is_kit?: boolean;
   components?: KitComponent[];
   images?: string[];
@@ -281,6 +284,7 @@ export interface PickerTask {
   offer_code: string | null;
   product_name: string | null;
   expected_barcode: string | null;
+  expected_barcodes?: string[];
   orders: PickerOrderItem[];
   total_orders: number;
   total_qty: number;

@@ -21,6 +21,10 @@ class Inventory:
         self._barcode_to_main: Dict[str, str] = {}
         # main_sku → barcode (первый/основной)
         self._main_to_barcode: Dict[str, str] = {}
+        # main_sku → ВСЕ штрихкоды товара. Один товар приезжает с фабрики в двух
+        # упаковках с разными кодами, и оба заведены в базе — сборщику годится
+        # любой (владелец 2026-09-15).
+        self._main_to_barcodes: Dict[str, list] = {}
         # main_sku → brand
         self._main_to_brand: Dict[str, str] = {}
         # main_sku → [{sku, name, qty}] для комплектов
@@ -96,6 +100,7 @@ class Inventory:
                             self._barcode_to_main[bc] = main
                     if bc_all and not is_dop:
                         self._main_to_barcode[main] = bc_all[0]
+                        self._main_to_barcodes[main] = bc_all
 
                     # Изображения: все URL из comma-separated списка
                     if not is_dop:
@@ -164,6 +169,11 @@ class Inventory:
         """Возвращает основной штрихкод для SKU, или None если нет."""
         return self._main_to_barcode.get(main_sku)
 
+    def barcodes_for_sku(self, main_sku: str) -> list:
+        """ВСЕ штрихкоды товара. Сборщику годится любой из них: один и тот же
+        товар приходит в разных упаковках, и в базе заведены оба кода."""
+        return list(self._main_to_barcodes.get(main_sku, []))
+
     def lookup_barcode(self, barcode: str) -> Optional[str]:
         """Возвращает main_sku по штрихкоду, или None если не найден.
         Дубли (dop_sku) автоматически разрешаются до родительского main_sku."""
@@ -187,6 +197,7 @@ class Inventory:
             "name": info[0] if info else main_sku,
             "is_kit": info[1] if info else False,
             "barcode": self._main_to_barcode.get(main_sku),
+            "barcodes": list(self._main_to_barcodes.get(main_sku, [])),
             "brand": self._main_to_brand.get(main_sku, ""),
             "components": self._main_to_components.get(main_sku, []),
             "images": self._main_to_images.get(main_sku, []),
